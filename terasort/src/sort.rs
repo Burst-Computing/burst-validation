@@ -1,7 +1,7 @@
 // use aws_config::meta::region::RegionProviderChain;
 // use aws_sdk_s3::config::Region;
+use burst_communication_middleware::Middleware;
 use bytes::Bytes;
-use group_communication_middleware::Middleware;
 use polars::prelude::*;
 use rusoto_core::{ByteStream, Region};
 use rusoto_credential::{EnvironmentProvider, ProvideAwsCredentials};

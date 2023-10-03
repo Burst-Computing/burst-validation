@@ -1,6 +1,6 @@
 use std::{fs::File, thread};
 
-use group_communication_middleware::{Middleware, MiddlewareArguments};
+use burst_communication_middleware::{Middleware, MiddlewareArguments};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{Error, Value};
 mod sort;
