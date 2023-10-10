@@ -182,29 +182,19 @@ async fn worker(
     *start_time = start.clone();
     drop(start_time); // Release the lock early
 
-    let global_rng = global_range.clone();
     let mddwr = middleware.clone();
     let send = tokio::spawn(async move {
         while elapsed_time < Duration::from_secs(duration) {
-            for receiver_id in global_rng.clone() {
-                if receiver_id == id {
-                    continue;
-                }
-                if let Err(e) = mddwr.send(receiver_id, data.clone()).await {
-                    error!("Error: {}", e);
-                }
-            }
-            elapsed_time = start.elapsed();
-        }
-
-        // Signal the end of data transfer to all receivers
-        for receiver_id in global_rng.clone() {
-            if receiver_id == id {
-                continue;
-            }
-            if let Err(e) = mddwr.send(receiver_id, Bytes::new()).await {
+            if let Err(e) = mddwr.broadcast(data.clone()).await {
                 error!("Error: {}", e);
             }
+            elapsed_time = start.elapsed();
+            //info!("elapsed_time: {:?}", elapsed_time)
+        }
+
+        // Signal the end of data transfer
+        if let Err(e) = mddwr.broadcast(Bytes::new()).await {
+            error!("Error: {}", e);
         }
     });
 
