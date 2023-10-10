@@ -5,9 +5,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+use burst_communication_middleware::{Middleware, MiddlewareArguments};
 use bytes::Bytes;
 use clap::Parser;
-use group_communication_middleware::{Middleware, MiddlewareArguments};
 use tracing::{error, info};
 use tracing_subscriber::{
     fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
@@ -22,16 +22,20 @@ const NUM_EXECUTIONS: usize = 3;
 #[derive(Parser, Debug)]
 pub struct Arguments {
     /// RabbitMQ server address
-    #[arg(
-        long = "rabbitmq-server",
-        default_value = "amqp://guest:guest@localhost:5672",
-        required = false
-    )]
+    #[arg(long = "rabbitmq-server", required = true)]
     pub rabbitmq_server: String,
 
-    /// Number of thread pairs
-    #[arg(required = true)]
-    pub num_threads: u32,
+    /// Local range
+    #[arg(long = "local-range-0", required = true)]
+    pub local_range_0: u32,
+    #[arg(long = "local-range-1", required = true)]
+    pub local_range_1: u32,
+
+    /// Global range
+    #[arg(long = "global-range-0", required = true)]
+    pub global_range_0: u32,
+    #[arg(long = "global-range-1", required = true)]
+    pub global_range_1: u32,
 }
 
 #[tokio::main]
@@ -45,10 +49,10 @@ async fn main() -> Result<()> {
 
     let args = Arguments::parse();
 
-    info!("{:?}", args);
+    println!("{:?}", args);
 
-    let global_range = 0..args.num_threads;
-    let local_range = 0..args.num_threads;
+    let global_range = args.local_range_0..args.local_range_1;
+    let local_range = args.local_range_0..args.local_range_1;
 
     let middleware = match Middleware::init_global(MiddlewareArguments::new(
         args.rabbitmq_server.clone(),
@@ -67,7 +71,7 @@ async fn main() -> Result<()> {
     let mut results = vec![];
 
     for i in 0..NUM_EXECUTIONS {
-        info!("Execution {} of {}", i + 1, NUM_EXECUTIONS);
+        println!("Execution {} of {}", i + 1, NUM_EXECUTIONS);
 
         let mut handles = vec![];
         let mut start_times = vec![];
@@ -109,10 +113,10 @@ async fn main() -> Result<()> {
                         bytes,
                     )
                     .await;
-                    info!("runtime end: id={}", i);
+                    println!("runtime end: id={}", i);
                     r
                 });
-                info!("thread end: id={}", i);
+                println!("thread end: id={}", i);
                 r
             }));
         }
@@ -121,7 +125,7 @@ async fn main() -> Result<()> {
             if let Err(e) = handle.join().unwrap() {
                 error!("{:?}", e);
             }
-            info!("join end");
+            println!("join end");
         }
 
         let start = start_times
@@ -138,9 +142,9 @@ async fn main() -> Result<()> {
 
         let mbytesps = bandwidth / 1024.0 / 1024.0;
 
-        info!("Total bytes: {}", total_bytes);
-        info!("Duration: {:.3} s", elapsed_time);
-        info!("Bandwidth: {:.3} MB/s", mbytesps);
+        println!("Total bytes: {}", total_bytes);
+        println!("Duration: {:.3} s", elapsed_time);
+        println!("Bandwidth: {:.3} MB/s", mbytesps);
 
         results.push(mbytesps);
     }
@@ -149,7 +153,7 @@ async fn main() -> Result<()> {
     let stdev =
         (results.iter().map(|x| (x - avg) * (x - avg)).sum::<f64>() / results.len() as f64).sqrt();
 
-    info!("Average,stdev: {:.3},{:.3}", avg, stdev);
+    println!("Average,stdev: {:.3},{:.3}", avg, stdev);
 
     Ok(())
 }
@@ -164,7 +168,7 @@ async fn worker(
     end_time: Arc<Mutex<Instant>>,
     total_bytes: Arc<Mutex<usize>>,
 ) -> Result<()> {
-    info!(
+    println!(
         "worker start: id={}, global_range={:?}, local_range={:?}",
         id, global_range, local_range
     );
@@ -230,7 +234,7 @@ async fn worker(
 
     let _ = tokio::join!(send, receive);
 
-    info!("worker end: id={}", id);
+    println!("worker end: id={}", id);
 
     Ok(())
 }

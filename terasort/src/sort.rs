@@ -101,7 +101,7 @@ async fn fetch_partition(
     // print buffer size
     println!("Buffer size: {}", buffer.len());
 
-    trim_chunk(&mut buffer, byte_range);
+    // trim_chunk(&mut buffer, byte_range);
 
     println!("Buffer size: {}", buffer.len());
 
