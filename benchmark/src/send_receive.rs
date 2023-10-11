@@ -29,9 +29,33 @@ pub struct Arguments {
     )]
     pub rabbitmq_server: String,
 
-    /// Number of thread pairs
+    /// Global range start
     #[arg(required = true)]
-    pub num_threads: u32,
+    pub global_range_start: u32,
+
+    /// Global range end
+    #[arg(required = true)]
+    pub global_range_end: u32,
+
+    /// Local range start
+    #[arg(required = true)]
+    pub local_range_start: u32,
+
+    /// Local range end
+    #[arg(required = true)]
+    pub local_range_end: u32,
+
+    /// Broadcast range start
+    #[arg(required = true)]
+    pub broadcast_range_start: u32,
+
+    /// Broadcast range end
+    #[arg(required = true)]
+    pub broadcast_range_star: u32,
+
+    // Broadcast group id
+    #[arg(required = true)]
+    pub broadcast_group_id: u32,
 }
 
 #[tokio::main]
@@ -47,9 +71,9 @@ async fn main() -> Result<()> {
 
     info!("{:?}", args);
 
-    let global_range = 0..args.num_threads;
-    let local_range = 0..args.num_threads;
-    let broadcast_range = 0..1;
+    let global_range = args.global_range_start..args.global_range_end;
+    let local_range = args.local_range_start..args.local_range_end;
+    let broadcast_range = args.broadcast_range_start..args.broadcast_range_star;
 
     let middleware = match Middleware::init_global(
         MiddlewareArguments::new(
@@ -58,7 +82,7 @@ async fn main() -> Result<()> {
             local_range.clone(),
             broadcast_range.clone(),
         ),
-        0,
+        args.broadcast_group_id,
     )
     .await
     {

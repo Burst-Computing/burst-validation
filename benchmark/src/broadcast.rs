@@ -29,9 +29,33 @@ pub struct Arguments {
     )]
     pub rabbitmq_server: String,
 
-    /// Number of thread pairs
+    /// Global range start
     #[arg(required = true)]
-    pub num_threads: u32,
+    pub global_range_start: u32,
+
+    /// Global range end
+    #[arg(required = true)]
+    pub global_range_end: u32,
+
+    /// Local range start
+    #[arg(required = true)]
+    pub local_range_start: u32,
+
+    /// Local range end
+    #[arg(required = true)]
+    pub local_range_end: u32,
+
+    /// Broadcast range start
+    #[arg(required = true)]
+    pub broadcast_range_start: u32,
+
+    /// Broadcast range end
+    #[arg(required = true)]
+    pub broadcast_range_star: u32,
+
+    // Broadcast group id
+    #[arg(required = true)]
+    pub broadcast_group_id: u32,
 }
 
 #[tokio::main]
@@ -47,27 +71,9 @@ async fn main() -> Result<()> {
 
     info!("{:?}", args);
 
-    let global_range = 0..args.num_threads;
-    let local_range = 0..args.num_threads;
-    let broadcast_range = 0..1;
-
-    let middleware = match Middleware::init_global(
-        MiddlewareArguments::new(
-            args.rabbitmq_server.clone(),
-            global_range.clone(),
-            local_range.clone(),
-            broadcast_range.clone(),
-        ),
-        0,
-    )
-    .await
-    {
-        Ok(m) => m,
-        Err(e) => {
-            error!("{:?}", e);
-            return Err(e);
-        }
-    };
+    let global_range = args.global_range_start..args.global_range_end;
+    let local_range = args.local_range_start..args.local_range_end;
+    let broadcast_range = args.broadcast_range_start..args.broadcast_range_star;
 
     let mut results = vec![];
 
@@ -78,6 +84,24 @@ async fn main() -> Result<()> {
         let mut start_times = vec![];
         let mut end_times = vec![];
         let mut total_bytes = vec![];
+
+        let middleware = match Middleware::init_global(
+            MiddlewareArguments::new(
+                args.rabbitmq_server.clone(),
+                global_range.clone(),
+                local_range.clone(),
+                broadcast_range.clone(),
+            ),
+            args.broadcast_group_id,
+        )
+        .await
+        {
+            Ok(m) => m,
+            Err(e) => {
+                error!("{:?}", e);
+                return Err(e);
+            }
+        };
 
         for i in local_range.clone() {
             let mut middleware = middleware.clone();
@@ -128,6 +152,9 @@ async fn main() -> Result<()> {
             }
             info!("join end");
         }
+
+        info!("start_times: {:?}", start_times);
+        info!("end_times: {:?}", end_times);
 
         let start = start_times
             .iter()
@@ -185,7 +212,7 @@ async fn worker(
     let mddwr = middleware.clone();
     let send = tokio::spawn(async move {
         while elapsed_time < Duration::from_secs(duration) {
-            if let Err(e) = mddwr.broadcast(data.clone()).await {
+            if let Err(e) = mddwr.broadcast(Some(data.clone())).await {
                 error!("Error: {}", e);
             }
             elapsed_time = start.elapsed();
@@ -193,7 +220,7 @@ async fn worker(
         }
 
         // Signal the end of data transfer
-        if let Err(e) = mddwr.broadcast(Bytes::new()).await {
+        if let Err(e) = mddwr.broadcast(Some(Bytes::new())).await {
             error!("Error: {}", e);
         }
     });
@@ -205,8 +232,9 @@ async fn worker(
 
         let mut num_empty = 0;
 
-        while let Ok(msg) = mddwr.recv().await {
+        while let Ok(Some(msg)) = mddwr.broadcast(None).await {
             if msg.data.is_empty() {
+                info!("msg: {:?}", msg);
                 num_empty += 1;
                 if num_empty == global_rng.len() - 1 {
                     break;
