@@ -210,48 +210,53 @@ async fn worker(
     drop(start_time); // Release the lock early
 
     let mddwr = middleware.clone();
-    let send = tokio::spawn(async move {
-        while elapsed_time < Duration::from_secs(duration) {
-            if let Err(e) = mddwr.broadcast(Some(data.clone())).await {
+
+    // If id 0, sender
+    if id == 0 {
+        let send = tokio::spawn(async move {
+            info!("Thread {} started sending", id);
+            while elapsed_time < Duration::from_secs(duration) {
+                if let Err(e) = mddwr.broadcast(Some(data.clone())).await {
+                    error!("Error: {}", e);
+                }
+                elapsed_time = start.elapsed();
+                //info!("elapsed_time: {:?}", elapsed_time)
+            }
+
+            // Signal the end of data transfer
+            if let Err(e) = mddwr.broadcast(Some(Bytes::new())).await {
                 error!("Error: {}", e);
             }
-            elapsed_time = start.elapsed();
-            //info!("elapsed_time: {:?}", elapsed_time)
-        }
 
-        // Signal the end of data transfer
-        if let Err(e) = mddwr.broadcast(Some(Bytes::new())).await {
-            error!("Error: {}", e);
-        }
-    });
+            info!("Thread {} finished sending", id);
+        });
+        send.await?;
+    // If id != 0, receiver
+    } else {
+        let mddwr = middleware.clone();
+        let receive = tokio::spawn(async move {
+            info!("Thread {} started receiving", id);
+            let mut received_bytes = 0;
 
-    let global_rng = global_range.clone();
-    let mddwr = middleware.clone();
-    let receive = tokio::spawn(async move {
-        let mut received_bytes = 0;
-
-        let mut num_empty = 0;
-
-        while let Ok(Some(msg)) = mddwr.broadcast(None).await {
-            if msg.data.is_empty() {
-                info!("msg: {:?}", msg);
-                num_empty += 1;
-                if num_empty == global_rng.len() - 1 {
+            while let Ok(Some(msg)) = mddwr.broadcast(None).await {
+                if msg.data.is_empty() {
+                    info!("Thread {} received empty message", id);
                     break;
                 }
+
+                received_bytes += msg.data.len();
             }
 
-            received_bytes += msg.data.len();
-        }
+            let mut total_bytes = total_bytes.lock().unwrap();
+            *total_bytes = received_bytes;
 
-        let mut total_bytes = total_bytes.lock().unwrap();
-        *total_bytes = received_bytes;
+            let mut end_time = end_time.lock().unwrap();
+            *end_time = Instant::now();
 
-        let mut end_time = end_time.lock().unwrap();
-        *end_time = Instant::now();
-    });
-
-    let _ = tokio::join!(send, receive);
+            info!("Thread {} finished receiving", id);
+        });
+        receive.await?;
+    }
 
     info!("worker end: id={}", id);
 
