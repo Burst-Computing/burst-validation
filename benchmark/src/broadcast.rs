@@ -51,9 +51,9 @@ pub struct Arguments {
 
     /// Broadcast range end
     #[arg(required = true)]
-    pub broadcast_range_star: u32,
+    pub broadcast_range_end: u32,
 
-    // Broadcast group id
+    /// Broadcast group id
     #[arg(required = true)]
     pub broadcast_group_id: u32,
 }
@@ -73,7 +73,7 @@ async fn main() -> Result<()> {
 
     let global_range = args.global_range_start..args.global_range_end;
     let local_range = args.local_range_start..args.local_range_end;
-    let broadcast_range = args.broadcast_range_start..args.broadcast_range_star;
+    let broadcast_range = args.broadcast_range_start..args.broadcast_range_end;
 
     let mut results = vec![];
 
