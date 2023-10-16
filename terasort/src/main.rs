@@ -36,11 +36,10 @@ async fn main() {
     // let mut threads = Vec::new();
 
     let input = inputs[0].clone();
-    let middleware = Middleware::init_global(MiddlewareArguments::new(
-        "amqp://rabbit:123456@localhost:5672".to_string(),
-        0..4,
-        0..4,
-    ))
+    let middleware = Middleware::init_global(
+        MiddlewareArguments::new("amqp://localhost:5672".to_string(), 0..4, 0..4, 0..1),
+        0,
+    )
     .await
     .unwrap();
 

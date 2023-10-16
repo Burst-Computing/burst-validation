@@ -22,7 +22,11 @@ const NUM_EXECUTIONS: usize = 3;
 #[derive(Parser, Debug)]
 pub struct Arguments {
     /// RabbitMQ server address
-    #[arg(long = "rabbitmq-server", required = true)]
+    #[arg(
+        long = "rabbitmq-server",
+        default_value = "amqp://guest:guest@localhost:5672",
+        required = false
+    )]
     pub rabbitmq_server: String,
 
     /// Global range start
@@ -65,39 +69,39 @@ async fn main() -> Result<()> {
 
     let args = Arguments::parse();
 
-    println!("{:?}", args);
+    info!("{:?}", args);
 
     let global_range = args.global_range_start..args.global_range_end;
     let local_range = args.local_range_start..args.local_range_end;
     let broadcast_range = args.broadcast_range_start..args.broadcast_range_star;
 
-    let middleware = match Middleware::init_global(
-        MiddlewareArguments::new(
-            args.rabbitmq_server.clone(),
-            global_range.clone(),
-            local_range.clone(),
-            broadcast_range.clone(),
-        ),
-        args.broadcast_group_id,
-    )
-    .await
-    {
-        Ok(m) => m,
-        Err(e) => {
-            error!("{:?}", e);
-            return Err(e);
-        }
-    };
-
     let mut results = vec![];
 
     for i in 0..NUM_EXECUTIONS {
-        println!("Execution {} of {}", i + 1, NUM_EXECUTIONS);
+        info!("Execution {} of {}", i + 1, NUM_EXECUTIONS);
 
         let mut handles = vec![];
         let mut start_times = vec![];
         let mut end_times = vec![];
         let mut total_bytes = vec![];
+
+        let middleware = match Middleware::init_global(
+            MiddlewareArguments::new(
+                args.rabbitmq_server.clone(),
+                global_range.clone(),
+                local_range.clone(),
+                broadcast_range.clone(),
+            ),
+            args.broadcast_group_id,
+        )
+        .await
+        {
+            Ok(m) => m,
+            Err(e) => {
+                error!("{:?}", e);
+                return Err(e);
+            }
+        };
 
         for i in local_range.clone() {
             let mut middleware = middleware.clone();
@@ -134,10 +138,10 @@ async fn main() -> Result<()> {
                         bytes,
                     )
                     .await;
-                    println!("runtime end: id={}", i);
+                    info!("runtime end: id={}", i);
                     r
                 });
-                println!("thread end: id={}", i);
+                info!("thread end: id={}", i);
                 r
             }));
         }
@@ -146,8 +150,11 @@ async fn main() -> Result<()> {
             if let Err(e) = handle.join().unwrap() {
                 error!("{:?}", e);
             }
-            println!("join end");
+            info!("join end");
         }
+
+        info!("start_times: {:?}", start_times);
+        info!("end_times: {:?}", end_times);
 
         let start = start_times
             .iter()
@@ -163,9 +170,9 @@ async fn main() -> Result<()> {
 
         let mbytesps = bandwidth / 1024.0 / 1024.0;
 
-        println!("Total bytes: {}", total_bytes);
-        println!("Duration: {:.3} s", elapsed_time);
-        println!("Bandwidth: {:.3} MB/s", mbytesps);
+        info!("Total bytes: {}", total_bytes);
+        info!("Duration: {:.3} s", elapsed_time);
+        info!("Bandwidth: {:.3} MB/s", mbytesps);
 
         results.push(mbytesps);
     }
@@ -174,7 +181,7 @@ async fn main() -> Result<()> {
     let stdev =
         (results.iter().map(|x| (x - avg) * (x - avg)).sum::<f64>() / results.len() as f64).sqrt();
 
-    println!("Average,stdev: {:.3},{:.3}", avg, stdev);
+    info!("Average,stdev: {:.3},{:.3}", avg, stdev);
 
     Ok(())
 }
@@ -189,7 +196,7 @@ async fn worker(
     end_time: Arc<Mutex<Instant>>,
     total_bytes: Arc<Mutex<usize>>,
 ) -> Result<()> {
-    println!(
+    info!(
         "worker start: id={}, global_range={:?}, local_range={:?}",
         id, global_range, local_range
     );
@@ -202,60 +209,56 @@ async fn worker(
     *start_time = start.clone();
     drop(start_time); // Release the lock early
 
-    let global_rng = global_range.clone();
     let mddwr = middleware.clone();
-    let send = tokio::spawn(async move {
-        while elapsed_time < Duration::from_secs(duration) {
-            for receiver_id in global_rng.clone() {
-                if receiver_id == id {
-                    continue;
-                }
-                if let Err(e) = mddwr.send(receiver_id, data.clone()).await {
+
+    // If id 0, sender
+    if id == 0 {
+        let send = tokio::spawn(async move {
+            info!("Thread {} started sending", id);
+            while elapsed_time < Duration::from_secs(duration) {
+                if let Err(e) = mddwr.broadcast(Some(data.clone())).await {
                     error!("Error: {}", e);
                 }
+                elapsed_time = start.elapsed();
+                //info!("elapsed_time: {:?}", elapsed_time)
             }
-            elapsed_time = start.elapsed();
-        }
 
-        // Signal the end of data transfer to all receivers
-        for receiver_id in global_rng.clone() {
-            if receiver_id == id {
-                continue;
-            }
-            if let Err(e) = mddwr.send(receiver_id, Bytes::new()).await {
+            // Signal the end of data transfer
+            if let Err(e) = mddwr.broadcast(Some(Bytes::new())).await {
                 error!("Error: {}", e);
             }
-        }
-    });
 
-    let global_rng = global_range.clone();
-    let mddwr = middleware.clone();
-    let receive = tokio::spawn(async move {
-        let mut received_bytes = 0;
+            info!("Thread {} finished sending", id);
+        });
+        send.await?;
+    // If id != 0, receiver
+    } else {
+        let mddwr = middleware.clone();
+        let receive = tokio::spawn(async move {
+            info!("Thread {} started receiving", id);
+            let mut received_bytes = 0;
 
-        let mut num_empty = 0;
-
-        while let Ok(msg) = mddwr.recv().await {
-            if msg.data.is_empty() {
-                num_empty += 1;
-                if num_empty == global_rng.len() - 1 {
+            while let Ok(Some(msg)) = mddwr.broadcast(None).await {
+                if msg.data.is_empty() {
+                    info!("Thread {} received empty message", id);
                     break;
                 }
+
+                received_bytes += msg.data.len();
             }
 
-            received_bytes += msg.data.len();
-        }
+            let mut total_bytes = total_bytes.lock().unwrap();
+            *total_bytes = received_bytes;
 
-        let mut total_bytes = total_bytes.lock().unwrap();
-        *total_bytes = received_bytes;
+            let mut end_time = end_time.lock().unwrap();
+            *end_time = Instant::now();
 
-        let mut end_time = end_time.lock().unwrap();
-        *end_time = Instant::now();
-    });
+            info!("Thread {} finished receiving", id);
+        });
+        receive.await?;
+    }
 
-    let _ = tokio::join!(send, receive);
-
-    println!("worker end: id={}", id);
+    info!("worker end: id={}", id);
 
     Ok(())
 }
