@@ -19,3 +19,7 @@ path = "src/send_receive.rs"
 [[example]]
 name = "broadcast"
 path = "src/broadcast.rs"
+
+[[example]]
+name = "gather"
+path = "src/gather.rs"
