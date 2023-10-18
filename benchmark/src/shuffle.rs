@@ -1,14 +1,13 @@
-use futures::sync::Mutex;
+use burst_communication_middleware::{create_group_handlers, BurstMiddleware, MiddlewareArguments};
+use bytes::Bytes;
+use clap::Parser;
 use std::{
     ops::Range,
     sync::Arc,
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
-
-use burst_communication_middleware::{create_group_handlers, BurstMiddleware, MiddlewareArguments};
-use bytes::Bytes;
-use clap::Parser;
+use tokio::sync::Mutex;
 use tracing::{error, info};
 use tracing_subscriber::{
     fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
@@ -73,6 +72,11 @@ async fn main() {
 
     let handles = create_group_handlers(burst_args).await.unwrap();
 
+    let t = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap();
+    println!("start: {}", t.as_millis() as f64 / 1000.0);
+
     let mut threads = Vec::with_capacity(handles.len());
     for handle in handles {
         let thread = thread::spawn(move || {
@@ -96,50 +100,94 @@ async fn main() {
     for thread in threads {
         thread.join().unwrap();
     }
+
+    let t = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap();
+    println!("end: {}", t.as_millis() as f64 / 1000.0);
 }
 
-async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> Result<()> {
+async fn worker(mut burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> Result<()> {
     println!("worker start: id={}", burst_middleware.worker_id);
     let data = Bytes::from(vec![b'x'; payload]);
 
-    let burst_size = burst_middleware.burst_size;
-    let worker_id = burst_middleware.worker_id;
-    let bm_send = Arc::new(Mutex::new(burst_middleware));
-    let bm_receive = bm_send.clone();
-
-    let send = tokio::spawn(async move {
-        for _ in 0..repeat {
-            for target in 0..burst_size {
-                if target == worker_id {
-                    continue;
-                }
-                let bm = bm_send.lock().await;
-                if let Err(e) = bm.send(target, data.clone()).await {
-                    error!("Error: {}", e);
-                }
-                drop(bm);
+    for _ in 0..repeat {
+        for target in 0..burst_middleware.burst_size {
+            if target == burst_middleware.worker_id {
+                continue;
+            }
+            if let Err(e) = burst_middleware.send(target, data.clone()).await {
+                error!("Error: {}", e);
             }
         }
-    });
+    }
 
-    let receive = tokio::spawn(async move {
-        for _ in 0..repeat {
-            for target in 0..burst_size {
-                if target == worker_id {
-                    continue;
-                }
-                let mut bm = bm_receive.lock().await;
-                if let Err(e) = bm.recv().await {
-                    error!("Error: {}", e);
-                }
-                drop(bm);
+    for _ in 0..repeat {
+        for target in 0..burst_middleware.burst_size {
+            if target == burst_middleware.worker_id {
+                continue;
+            }
+            if let Err(e) = burst_middleware.recv().await {
+                error!("Error: {}", e);
             }
         }
-    });
+    }
 
-    let _ = tokio::join!(send, receive);
-
-    println!("worker end: id={}", worker_id);
+    println!("worker end: id={}", burst_middleware.worker_id);
 
     Ok(())
 }
+
+// async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> Result<()> {
+//     println!("worker start: id={}", burst_middleware.worker_id);
+//     let data = Bytes::from(vec![b'x'; payload]);
+
+//     let burst_size = burst_middleware.burst_size;
+//     let worker_id = burst_middleware.worker_id;
+//     let burst_middleware = Arc::new(Mutex::new(burst_middleware));
+//     let bm_send = Arc::clone(&burst_middleware);
+//     let bm_receive = Arc::clone(&burst_middleware);
+
+//     let send = tokio::spawn(async move {
+//         for i in 0..repeat {
+//             // println!("send loop {}: id={}", i, worker_id);
+//             for target in 0..burst_size {
+//                 if target == worker_id {
+//                     continue;
+//                 } else {
+//                     let bm = bm_send.lock().await;
+//                     if let Err(e) = bm.send(target, data.clone()).await {
+//                         error!("Error: {}", e);
+//                     }
+//                     drop(bm);
+//                 }
+//             }
+//         }
+//         println!("send end: id={}", worker_id);
+//     });
+
+//     let receive = tokio::spawn(async move {
+//         println!("recieve start: id={}", worker_id);
+//         for i in 0..repeat {
+//             // println!("receive loop {}: id={}", i, worker_id);
+//             for target in 0..burst_size {
+//                 if target == worker_id {
+//                     continue;
+//                 } else {
+//                     let mut bm = bm_receive.lock().await;
+//                     if let Err(e) = bm.recv().await {
+//                         error!("Error: {}", e);
+//                     }
+//                     drop(bm);
+//                 }
+//             }
+//         }
+//         println!("recieve end: id={}", worker_id);
+//     });
+
+//     let _ = tokio::join!(send, receive);
+
+//     println!("worker end: id={}", worker_id);
+
+//     Ok(())
+// }
