@@ -2,13 +2,13 @@ use std::{
     ops::Range,
     sync::{Arc, Mutex},
     thread,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use burst_communication_middleware::{Middleware, MiddlewareArguments};
 use bytes::Bytes;
 use clap::Parser;
-use tracing::{error, info};
+use log::{error, info};
 use tracing_subscriber::{
     fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
@@ -16,7 +16,7 @@ use tracing_subscriber::{
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 const DURATION: u64 = 2;
-const CHUNK_SIZE: usize = 1024 * 1024; // 1 MB
+const CHUNK_SIZE: usize = 10; // 1 MB
 const NUM_EXECUTIONS: usize = 3;
 
 #[derive(Parser, Debug)]
@@ -191,7 +191,7 @@ async fn worker(
     id: u32,
     global_range: Range<u32>,
     local_range: Range<u32>,
-    duration: u64,
+    _duration: u64,
     start_time: Arc<Mutex<Instant>>,
     end_time: Arc<Mutex<Instant>>,
     total_bytes: Arc<Mutex<usize>>,
@@ -203,29 +203,23 @@ async fn worker(
 
     let data = Bytes::from(vec![b'x'; CHUNK_SIZE]);
 
-    let mut elapsed_time = Duration::new(0, 0);
+    //let mut elapsed_time = Duration::new(0, 0);
     let start = Instant::now();
     let mut start_time = start_time.lock().unwrap();
     *start_time = start.clone();
     drop(start_time); // Release the lock early
 
-    let mddwr = middleware.clone();
+    let mut mddwr = middleware.clone();
 
     // If id 0, receiver
     if id == 0 {
-        let mddwr = middleware.clone();
+        //let mut mddwr = middleware.clone();
         let receive = tokio::spawn(async move {
             info!("Thread {} started receiving", id);
             let mut received_bytes = 0;
 
-            if let Ok(Some(msgs)) = mddwr.gather(data.clone()).await {
-                info!(
-                    "Received {} messages: {:?}",
-                    msgs.len(),
-                    msgs.iter()
-                        .map(|x| format!("{}, {}", x.sender_id, x.data.len()))
-                        .collect::<Vec<_>>()
-                );
+            while let Ok(Some(msgs)) = mddwr.gather(data.clone()).await {
+                info!("Received {} messages: {:?}", msgs.len(), msgs);
 
                 // check if ordered
                 msgs.iter().enumerate().for_each(|(i, msg)| {
@@ -241,6 +235,7 @@ async fn worker(
                 // Check if all empty except mine
                 if msgs.iter().filter(|x| x.data.is_empty()).count() == global_range.len() - 1 {
                     info!("Received {} empty messages", global_range.len() - 1);
+                    break;
                 }
 
                 received_bytes += msgs.iter().map(|x| x.data.len()).sum::<usize>();
@@ -268,9 +263,9 @@ async fn worker(
             // }
 
             // Signal the end of data transfer
-            // if let Err(e) = mddwr.gather(Bytes::new()).await {
-            //     error!("Error: {}", e);
-            // }
+            if let Err(e) = mddwr.gather(Bytes::new()).await {
+                error!("Error: {}", e);
+            }
 
             info!("Thread {} finished sending", id);
         });

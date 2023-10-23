@@ -8,14 +8,14 @@ use std::{
 use burst_communication_middleware::{Middleware, MiddlewareArguments};
 use bytes::Bytes;
 use clap::Parser;
-use tracing::{error, info};
+use log::{error, info};
 use tracing_subscriber::{
     fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-const DURATION: u64 = 2;
+const DURATION: u64 = 1;
 const CHUNK_SIZE: usize = 1024 * 1024; // 1 MB
 const NUM_EXECUTIONS: usize = 3;
 
@@ -209,19 +209,23 @@ async fn worker(
     *start_time = start.clone();
     drop(start_time); // Release the lock early
 
-    let mddwr = middleware.clone();
+    let mut mddwr = middleware.clone();
 
     // If id 0, sender
     if id == 0 {
         let send = tokio::spawn(async move {
             info!("Thread {} started sending", id);
+            let mut message_counter = 0;
             while elapsed_time < Duration::from_secs(duration) {
                 if let Err(e) = mddwr.broadcast(Some(data.clone())).await {
                     error!("Error: {}", e);
                 }
                 elapsed_time = start.elapsed();
+                message_counter += 1;
                 //info!("elapsed_time: {:?}", elapsed_time)
             }
+
+            info!("Thread {} sent {} messages", id, message_counter);
 
             // Signal the end of data transfer
             if let Err(e) = mddwr.broadcast(Some(Bytes::new())).await {
@@ -233,10 +237,10 @@ async fn worker(
         send.await?;
     // If id != 0, receiver
     } else {
-        let mddwr = middleware.clone();
         let receive = tokio::spawn(async move {
             info!("Thread {} started receiving", id);
             let mut received_bytes = 0;
+            let mut message_counter = 0;
 
             while let Ok(Some(msg)) = mddwr.broadcast(None).await {
                 if msg.data.is_empty() {
@@ -245,7 +249,10 @@ async fn worker(
                 }
 
                 received_bytes += msg.data.len();
+                message_counter += 1;
             }
+
+            info!("Thread {} received {} messages", id, message_counter);
 
             let mut total_bytes = total_bytes.lock().unwrap();
             *total_bytes = received_bytes;
