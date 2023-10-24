@@ -5,15 +5,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-use burst_communication_middleware::{Middleware, MiddlewareArguments};
+use burst_communication_middleware::{
+    BurstMiddleware, Middleware, MiddlewareOptions, MiddlewareProxy, RabbitMQMiddleware,
+    RabbitMQOptions, Result,
+};
 use bytes::Bytes;
 use clap::Parser;
 use log::{error, info};
 use tracing_subscriber::{
     fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
-
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 const DURATION: u64 = 2;
 const CHUNK_SIZE: usize = 1024 * 1024; // 1 MB
@@ -59,13 +60,16 @@ pub struct Arguments {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     // Setup logging
 
-    tracing_subscriber::registry()
-        .with(fmt::layer())
+    if let Err(err) = tracing_subscriber::registry()
+        .with(fmt::layer().pretty())
         .with(EnvFilter::from_default_env())
-        .try_init()?;
+        .try_init()
+    {
+        eprintln!("Failed to initialize logging: {}", err);
+    }
 
     let args = Arguments::parse();
 
@@ -74,24 +78,6 @@ async fn main() -> Result<()> {
     let global_range = args.global_range_start..args.global_range_end;
     let local_range = args.local_range_start..args.local_range_end;
     let broadcast_range = args.broadcast_range_start..args.broadcast_range_end;
-
-    let middleware = match Middleware::init_global(
-        MiddlewareArguments::new(
-            args.rabbitmq_server.clone(),
-            global_range.clone(),
-            local_range.clone(),
-            broadcast_range.clone(),
-        ),
-        args.broadcast_group_id,
-    )
-    .await
-    {
-        Ok(m) => m,
-        Err(e) => {
-            error!("{:?}", e);
-            return Err(e);
-        }
-    };
 
     let mut results = vec![];
 
@@ -103,8 +89,39 @@ async fn main() -> Result<()> {
         let mut end_times = vec![];
         let mut total_bytes = vec![];
 
-        for i in local_range.clone() {
-            let mut middleware = middleware.clone();
+        let middleware_options = MiddlewareOptions::new(
+            global_range.clone(),
+            local_range.clone(),
+            broadcast_range.clone(),
+        );
+
+        let mut middleware = BurstMiddleware::new(middleware_options.clone());
+
+        let rabbitmq_middleware = match RabbitMQMiddleware::new(
+            middleware_options,
+            RabbitMQOptions::new(args.rabbitmq_server.to_string())
+                .ack(true)
+                .build(),
+            args.broadcast_group_id,
+        )
+        .await
+        {
+            Ok(m) => m,
+            Err(e) => {
+                error!("{:?}", e);
+                panic!();
+            }
+        };
+
+        let proxies = match middleware.create_proxies(rabbitmq_middleware).await {
+            Ok(p) => p,
+            Err(e) => {
+                error!("{:?}", e);
+                panic!();
+            }
+        };
+
+        for (id, proxy) in proxies {
             let global_range = global_range.clone();
             let local_range = local_range.clone();
 
@@ -122,14 +139,9 @@ async fn main() -> Result<()> {
                     .build()
                     .unwrap();
                 let r = rt.block_on(async {
-                    middleware
-                        .init_local(i)
-                        .await
-                        .expect("Failed to init middleware");
-
                     let r = worker(
-                        middleware,
-                        i,
+                        proxy,
+                        id,
                         global_range.clone(),
                         local_range.clone(),
                         DURATION,
@@ -152,6 +164,9 @@ async fn main() -> Result<()> {
             }
             info!("join end");
         }
+
+        info!("start_times: {:?}", start_times);
+        info!("end_times: {:?}", end_times);
 
         let start = start_times
             .iter()
@@ -179,12 +194,10 @@ async fn main() -> Result<()> {
         (results.iter().map(|x| (x - avg) * (x - avg)).sum::<f64>() / results.len() as f64).sqrt();
 
     info!("Average,stdev: {:.3},{:.3}", avg, stdev);
-
-    Ok(())
 }
 
 async fn worker(
-    middleware: Middleware,
+    middleware: Box<dyn MiddlewareProxy>,
     id: u32,
     global_range: Range<u32>,
     local_range: Range<u32>,
@@ -207,9 +220,10 @@ async fn worker(
     drop(start_time); // Release the lock early
 
     let global_rng = global_range.clone();
-    let mddwr = middleware.clone();
+    let mut middleware = middleware;
     let send = tokio::spawn(async move {
         info!("Thread {} started sending", id);
+        let mddwr = &middleware;
         let mut message_counter = 0;
         while elapsed_time < Duration::from_secs(duration) {
             for receiver_id in global_rng.clone() {
@@ -240,9 +254,9 @@ async fn worker(
     });
 
     let global_rng = global_range.clone();
-    let mut mddwr = middleware.clone();
     let receive = tokio::spawn(async move {
         info!("Thread {} started receiving", id);
+        let mut mddwr = middleware;
         let mut received_bytes = 0;
 
         let mut message_counter = 0;

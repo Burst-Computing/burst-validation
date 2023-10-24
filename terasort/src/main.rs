@@ -1,6 +1,6 @@
 use std::{fs::File, thread};
 
-use burst_communication_middleware::{Middleware, MiddlewareArguments};
+use burst_communication_middleware::{BurstMiddleware, MiddlewareArguments};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{Error, Value};
 mod sort;
@@ -36,7 +36,7 @@ async fn main() {
     // let mut threads = Vec::new();
 
     let input = inputs[0].clone();
-    let middleware = Middleware::init_global(
+    let middleware = BurstMiddleware::init_global(
         MiddlewareArguments::new("amqp://localhost:5672".to_string(), 0..4, 0..4, 0..1),
         0,
     )
@@ -85,7 +85,7 @@ async fn main() {
 }
 
 // ow_main would be the entry point of an actual open whisk burst worker
-pub async fn ow_main(args: Value, burst_middleware: Middleware) -> Result<Value, Error> {
+pub async fn ow_main(args: Value, burst_middleware: BurstMiddleware) -> Result<Value, Error> {
     let input: Input = serde_json::from_value(args)?;
 
     println!("{:?}", input);

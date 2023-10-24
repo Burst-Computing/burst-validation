@@ -1,6 +1,6 @@
 // use aws_config::meta::region::RegionProviderChain;
 // use aws_sdk_s3::config::Region;
-use burst_communication_middleware::Middleware;
+use burst_communication_middleware::BurstMiddleware;
 use bytes::Bytes;
 use polars::prelude::*;
 use rusoto_core::{ByteStream, Region};
@@ -12,7 +12,7 @@ use tokio::io::AsyncReadExt;
 const PADDING: u32 = 512;
 
 pub async fn sort(
-    burst_middleware: Middleware,
+    burst_middleware: BurstMiddleware,
     bucket: String,
     key: String,
     obj_size: u32,
@@ -147,7 +147,7 @@ fn trim_chunk(buff: &mut Vec<u8>, range: (u32, u32)) {
 }
 
 async fn shuffle_partition(
-    burst_middleware: &Middleware,
+    burst_middleware: &BurstMiddleware,
     df: &DataFrame,
     column_name: &String,
     bounds: Vec<String>,
@@ -205,7 +205,7 @@ async fn shuffle_partition(
 }
 
 async fn aggregate_and_sort(
-    burst_middleware: Middleware,
+    burst_middleware: BurstMiddleware,
     column_name: String,
     schema: Schema,
     partition_idx: u32,
