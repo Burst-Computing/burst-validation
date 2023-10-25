@@ -2,7 +2,7 @@ use std::{
     ops::Range,
     sync::{Arc, Mutex},
     thread,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use burst_communication_middleware::{
@@ -17,7 +17,7 @@ use tracing_subscriber::{
 };
 
 const DURATION: u64 = 2;
-const CHUNK_SIZE: usize = 1024 * 1024; // 1 MB
+const CHUNK_SIZE: usize = 10; // 1 MB
 const NUM_EXECUTIONS: usize = 3;
 
 #[derive(Parser, Debug)]
@@ -64,7 +64,7 @@ async fn main() {
     // Setup logging
 
     if let Err(err) = tracing_subscriber::registry()
-        .with(fmt::layer().pretty())
+        .with(fmt::layer())
         .with(EnvFilter::from_default_env())
         .try_init()
     {
@@ -201,7 +201,7 @@ async fn worker(
     id: u32,
     global_range: Range<u32>,
     local_range: Range<u32>,
-    duration: u64,
+    _duration: u64,
     start_time: Arc<Mutex<Instant>>,
     end_time: Arc<Mutex<Instant>>,
     total_bytes: Arc<Mutex<usize>>,
@@ -213,80 +213,74 @@ async fn worker(
 
     let data = Bytes::from(vec![b'x'; CHUNK_SIZE]);
 
-    let mut elapsed_time = Duration::new(0, 0);
+    //let mut elapsed_time = Duration::new(0, 0);
     let start = Instant::now();
     let mut start_time = start_time.lock().unwrap();
     *start_time = start.clone();
     drop(start_time); // Release the lock early
 
-    let global_rng = global_range.clone();
-    let mut middleware = middleware;
-    let send = tokio::spawn(async move {
-        info!("Thread {} started sending", id);
-        let mddwr = &middleware;
-        let mut message_counter = 0;
-        while elapsed_time < Duration::from_secs(duration) {
-            for receiver_id in global_rng.clone() {
-                if receiver_id == id {
-                    continue;
-                }
-                if let Err(e) = mddwr.send(receiver_id, data.clone()).await {
-                    error!("Error: {}", e);
-                }
-                message_counter += 1;
-            }
-            elapsed_time = start.elapsed();
-        }
+    // If id 0, receiver
+    if id == 0 {
+        //let mut mddwr = middleware.clone();
+        let receive = tokio::spawn(async move {
+            info!("Thread {} started receiving", id);
+            let mut mddwr = middleware;
+            let mut received_bytes = 0;
 
-        info!("Thread {} sent {} messages", id, message_counter);
+            while let Ok(Some(msgs)) = mddwr.gather(data.clone()).await {
+                info!("Received {} messages: {:?}", msgs.len(), msgs);
 
-        // Signal the end of data transfer to all receivers
-        for receiver_id in global_rng.clone() {
-            if receiver_id == id {
-                continue;
-            }
-            if let Err(e) = mddwr.send(receiver_id, Bytes::new()).await {
-                error!("Error: {}", e);
-            }
-        }
+                // check if ordered
+                msgs.iter().enumerate().for_each(|(i, msg)| {
+                    if msg.sender_id != global_range.start + i as u32 {
+                        error!(
+                            "Received data is not in order: {} != {}",
+                            msg.sender_id,
+                            global_range.start + i as u32
+                        );
+                    }
+                });
 
-        info!("Thread {} finished sending", id);
-    });
-
-    let global_rng = global_range.clone();
-    let receive = tokio::spawn(async move {
-        info!("Thread {} started receiving", id);
-        let mut mddwr = middleware;
-        let mut received_bytes = 0;
-
-        let mut message_counter = 0;
-        let mut num_empty = 0;
-
-        while let Ok(msg) = mddwr.recv().await {
-            if msg.data.is_empty() {
-                info!("Thread {} received empty message", id);
-                num_empty += 1;
-                if num_empty == global_rng.len() - 1 {
+                // Check if all empty except mine
+                if msgs.iter().filter(|x| x.data.is_empty()).count() == global_range.len() - 1 {
+                    info!("Received {} empty messages", global_range.len() - 1);
                     break;
                 }
+
+                received_bytes += msgs.iter().map(|x| x.data.len()).sum::<usize>();
             }
 
-            received_bytes += msg.data.len();
-            message_counter += 1;
-        }
+            let mut total_bytes = total_bytes.lock().unwrap();
+            *total_bytes = received_bytes;
 
-        info!("Thread {} received {} messages", id, message_counter);
+            let mut end_time = end_time.lock().unwrap();
+            *end_time = Instant::now();
 
-        let mut total_bytes = total_bytes.lock().unwrap();
-        *total_bytes = received_bytes;
+            info!("Thread {} finished receiving", id);
+        });
+        receive.await?;
+    // If id != 0, sender
+    } else {
+        let send = tokio::spawn(async move {
+            info!("Thread {} started sending", id);
+            let mut mddwr = middleware;
+            // while elapsed_time < Duration::from_secs(duration) {
+            if let Err(e) = mddwr.gather(data.clone()).await {
+                error!("Error: {}", e);
+            }
+            // elapsed_time = start.elapsed();
+            // info!("elapsed_time: {:?}", elapsed_time)
+            // }
 
-        let mut end_time = end_time.lock().unwrap();
-        *end_time = Instant::now();
+            // Signal the end of data transfer
+            if let Err(e) = mddwr.gather(Bytes::new()).await {
+                error!("Error: {}", e);
+            }
 
-        info!("Thread {} finished receiving", id);
-    });
-
-    let _ = tokio::join!(send, receive);
+            info!("Thread {} finished sending", id);
+        });
+        send.await?;
+    }
 
     info!("worker end: id={}", id);
 

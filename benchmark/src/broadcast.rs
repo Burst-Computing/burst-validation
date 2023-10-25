@@ -5,19 +5,19 @@ use std::{
     time::{Duration, Instant},
 };
 
-use burst_communication_middleware::{Middleware, MiddlewareArguments};
+use burst_communication_middleware::{
+    BurstMiddleware, Middleware, MiddlewareOptions, MiddlewareProxy, RabbitMQMiddleware,
+    RabbitMQOptions, Result,
+};
 use bytes::Bytes;
 use clap::Parser;
-use tracing::{error, info};
+use log::{error, info};
 use tracing_subscriber::{
     fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
 const DURATION: u64 = 2;
 const CHUNK_SIZE: usize = 1024 * 1024; // 1 MB
-const NUM_EXECUTIONS: usize = 3;
 
 #[derive(Parser, Debug)]
 pub struct Arguments {
@@ -59,13 +59,16 @@ pub struct Arguments {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     // Setup logging
 
-    tracing_subscriber::registry()
+    if let Err(err) = tracing_subscriber::registry()
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
-        .try_init()?;
+        .try_init()
+    {
+        eprintln!("Failed to initialize logging: {}", err);
+    }
 
     let args = Arguments::parse();
 
@@ -75,119 +78,111 @@ async fn main() -> Result<()> {
     let local_range = args.local_range_start..args.local_range_end;
     let broadcast_range = args.broadcast_range_start..args.broadcast_range_end;
 
-    let mut results = vec![];
+    let mut handles = vec![];
+    let mut start_times = vec![];
+    let mut end_times = vec![];
+    let mut total_bytes = vec![];
 
-    for i in 0..NUM_EXECUTIONS {
-        info!("Execution {} of {}", i + 1, NUM_EXECUTIONS);
+    let middleware_options = MiddlewareOptions::new(
+        global_range.clone(),
+        local_range.clone(),
+        broadcast_range.clone(),
+    );
 
-        let mut handles = vec![];
-        let mut start_times = vec![];
-        let mut end_times = vec![];
-        let mut total_bytes = vec![];
+    let mut middleware = BurstMiddleware::new(middleware_options.clone());
 
-        let middleware = match Middleware::init_global(
-            MiddlewareArguments::new(
-                args.rabbitmq_server.clone(),
-                global_range.clone(),
-                local_range.clone(),
-                broadcast_range.clone(),
-            ),
-            args.broadcast_group_id,
-        )
-        .await
-        {
-            Ok(m) => m,
-            Err(e) => {
-                error!("{:?}", e);
-                return Err(e);
-            }
-        };
+    let rabbitmq_middleware = match RabbitMQMiddleware::new(
+        middleware_options,
+        RabbitMQOptions::new(args.rabbitmq_server.to_string())
+            .ack(true)
+            .build(),
+        args.broadcast_group_id,
+    )
+    .await
+    {
+        Ok(m) => m,
+        Err(e) => {
+            error!("{:?}", e);
+            panic!();
+        }
+    };
 
-        for i in local_range.clone() {
-            let mut middleware = middleware.clone();
-            let global_range = global_range.clone();
-            let local_range = local_range.clone();
+    let proxies = match middleware.create_proxies(rabbitmq_middleware).await {
+        Ok(p) => p,
+        Err(e) => {
+            error!("{:?}", e);
+            panic!();
+        }
+    };
 
-            let start_time = Arc::new(Mutex::new(Instant::now()));
-            let end_time = Arc::new(Mutex::new(Instant::now()));
-            let bytes = Arc::new(Mutex::new(0));
+    for (id, proxy) in proxies {
+        let global_range = global_range.clone();
+        let local_range = local_range.clone();
 
-            start_times.push(start_time.clone());
-            end_times.push(end_time.clone());
-            total_bytes.push(bytes.clone());
+        let start_time = Arc::new(Mutex::new(Instant::now()));
+        let end_time = Arc::new(Mutex::new(Instant::now()));
+        let bytes = Arc::new(Mutex::new(0));
 
-            handles.push(thread::spawn(move || {
-                let rt = tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap();
-                let r = rt.block_on(async {
-                    middleware
-                        .init_local(i)
-                        .await
-                        .expect("Failed to init middleware");
+        start_times.push(start_time.clone());
+        end_times.push(end_time.clone());
+        total_bytes.push(bytes.clone());
 
-                    let r = worker(
-                        middleware,
-                        i,
-                        global_range.clone(),
-                        local_range.clone(),
-                        DURATION,
-                        start_time,
-                        end_time,
-                        bytes,
-                    )
-                    .await;
-                    info!("runtime end: id={}", i);
-                    r
-                });
-                info!("thread end: id={}", i);
+        handles.push(thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let r = rt.block_on(async {
+                let r = worker(
+                    proxy,
+                    id,
+                    global_range.clone(),
+                    local_range.clone(),
+                    DURATION,
+                    start_time,
+                    end_time,
+                    bytes,
+                )
+                .await;
+                info!("runtime end: id={}", id);
                 r
-            }));
-        }
-
-        for handle in handles {
-            if let Err(e) = handle.join().unwrap() {
-                error!("{:?}", e);
-            }
-            info!("join end");
-        }
-
-        info!("start_times: {:?}", start_times);
-        info!("end_times: {:?}", end_times);
-
-        let start = start_times
-            .iter()
-            .map(|x| *x.lock().unwrap())
-            .min()
-            .unwrap();
-        let end = end_times.iter().map(|x| *x.lock().unwrap()).max().unwrap();
-        let elapsed_time = end.duration_since(start).as_secs_f64();
-
-        let total_bytes: usize = total_bytes.iter().map(|x| *x.lock().unwrap()).sum();
-
-        let bandwidth = total_bytes as f64 / elapsed_time;
-
-        let mbytesps = bandwidth / 1024.0 / 1024.0;
-
-        info!("Total bytes: {}", total_bytes);
-        info!("Duration: {:.3} s", elapsed_time);
-        info!("Bandwidth: {:.3} MB/s", mbytesps);
-
-        results.push(mbytesps);
+            });
+            info!("thread end: id={}", id);
+            r
+        }));
     }
 
-    let avg = results.iter().sum::<f64>() / results.len() as f64;
-    let stdev =
-        (results.iter().map(|x| (x - avg) * (x - avg)).sum::<f64>() / results.len() as f64).sqrt();
+    for handle in handles {
+        if let Err(e) = handle.join().unwrap() {
+            error!("{:?}", e);
+        }
+        info!("join end");
+    }
 
-    info!("Average,stdev: {:.3},{:.3}", avg, stdev);
+    info!("start_times: {:?}", start_times);
+    info!("end_times: {:?}", end_times);
 
-    Ok(())
+    let start = start_times
+        .iter()
+        .map(|x| *x.lock().unwrap())
+        .min()
+        .unwrap();
+    let end = end_times.iter().map(|x| *x.lock().unwrap()).max().unwrap();
+    let elapsed_time = end.duration_since(start).as_secs_f64();
+
+    let total_bytes: usize = total_bytes.iter().map(|x| *x.lock().unwrap()).sum();
+
+    let bandwidth = total_bytes as f64 / elapsed_time;
+
+    let mbytesps = bandwidth / 1024.0 / 1024.0;
+
+    info!("Total bytes: {}", total_bytes);
+    info!("Duration: {:.3} s", elapsed_time);
+    info!("Bandwidth: {:.3} MB/s", mbytesps);
 }
 
 async fn worker(
-    middleware: Middleware,
+    middleware: Box<dyn MiddlewareProxy>,
     id: u32,
     global_range: Range<u32>,
     local_range: Range<u32>,
@@ -209,19 +204,22 @@ async fn worker(
     *start_time = start.clone();
     drop(start_time); // Release the lock early
 
-    let mddwr = middleware.clone();
-
     // If id 0, sender
     if id == 0 {
         let send = tokio::spawn(async move {
             info!("Thread {} started sending", id);
+            let mut mddwr = middleware;
+            let mut message_counter = 0;
             while elapsed_time < Duration::from_secs(duration) {
                 if let Err(e) = mddwr.broadcast(Some(data.clone())).await {
                     error!("Error: {}", e);
                 }
                 elapsed_time = start.elapsed();
+                message_counter += 1;
                 //info!("elapsed_time: {:?}", elapsed_time)
             }
+
+            info!("Thread {} sent {} messages", id, message_counter);
 
             // Signal the end of data transfer
             if let Err(e) = mddwr.broadcast(Some(Bytes::new())).await {
@@ -233,10 +231,11 @@ async fn worker(
         send.await?;
     // If id != 0, receiver
     } else {
-        let mddwr = middleware.clone();
         let receive = tokio::spawn(async move {
             info!("Thread {} started receiving", id);
+            let mut mddwr = middleware;
             let mut received_bytes = 0;
+            let mut message_counter = 0;
 
             while let Ok(Some(msg)) = mddwr.broadcast(None).await {
                 if msg.data.is_empty() {
@@ -245,7 +244,10 @@ async fn worker(
                 }
 
                 received_bytes += msg.data.len();
+                message_counter += 1;
             }
+
+            info!("Thread {} received {} messages", id, message_counter);
 
             let mut total_bytes = total_bytes.lock().unwrap();
             *total_bytes = received_bytes;
