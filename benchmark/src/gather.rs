@@ -2,7 +2,7 @@ use std::{
     ops::Range,
     sync::{Arc, Mutex},
     thread,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use burst_communication_middleware::{
@@ -64,7 +64,7 @@ async fn main() {
     // Setup logging
 
     if let Err(err) = tracing_subscriber::registry()
-        .with(fmt::layer().pretty())
+        .with(fmt::layer())
         .with(EnvFilter::from_default_env())
         .try_init()
     {

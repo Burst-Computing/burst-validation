@@ -16,9 +16,8 @@ use tracing_subscriber::{
     fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
 
-const DURATION: u64 = 1;
+const DURATION: u64 = 2;
 const CHUNK_SIZE: usize = 1024 * 1024; // 1 MB
-const NUM_EXECUTIONS: usize = 3;
 
 #[derive(Parser, Debug)]
 pub struct Arguments {
@@ -79,121 +78,107 @@ async fn main() {
     let local_range = args.local_range_start..args.local_range_end;
     let broadcast_range = args.broadcast_range_start..args.broadcast_range_end;
 
-    let mut results = vec![];
+    let mut handles = vec![];
+    let mut start_times = vec![];
+    let mut end_times = vec![];
+    let mut total_bytes = vec![];
 
-    for i in 0..NUM_EXECUTIONS {
-        info!("Execution {} of {}", i + 1, NUM_EXECUTIONS);
+    let middleware_options = MiddlewareOptions::new(
+        global_range.clone(),
+        local_range.clone(),
+        broadcast_range.clone(),
+    );
 
-        let mut handles = vec![];
-        let mut start_times = vec![];
-        let mut end_times = vec![];
-        let mut total_bytes = vec![];
+    let mut middleware = BurstMiddleware::new(middleware_options.clone());
 
-        let middleware_options = MiddlewareOptions::new(
-            global_range.clone(),
-            local_range.clone(),
-            broadcast_range.clone(),
-        );
+    let rabbitmq_middleware = match RabbitMQMiddleware::new(
+        middleware_options,
+        RabbitMQOptions::new(args.rabbitmq_server.to_string())
+            .ack(true)
+            .build(),
+        args.broadcast_group_id,
+    )
+    .await
+    {
+        Ok(m) => m,
+        Err(e) => {
+            error!("{:?}", e);
+            panic!();
+        }
+    };
 
-        let mut middleware = BurstMiddleware::new(middleware_options.clone());
+    let proxies = match middleware.create_proxies(rabbitmq_middleware).await {
+        Ok(p) => p,
+        Err(e) => {
+            error!("{:?}", e);
+            panic!();
+        }
+    };
 
-        let rabbitmq_middleware = match RabbitMQMiddleware::new(
-            middleware_options,
-            RabbitMQOptions::new(args.rabbitmq_server.to_string())
-                .ack(true)
-                .build(),
-            args.broadcast_group_id,
-        )
-        .await
-        {
-            Ok(m) => m,
-            Err(e) => {
-                error!("{:?}", e);
-                panic!();
-            }
-        };
+    for (id, proxy) in proxies {
+        let global_range = global_range.clone();
+        let local_range = local_range.clone();
 
-        let proxies = match middleware.create_proxies(rabbitmq_middleware).await {
-            Ok(p) => p,
-            Err(e) => {
-                error!("{:?}", e);
-                panic!();
-            }
-        };
+        let start_time = Arc::new(Mutex::new(Instant::now()));
+        let end_time = Arc::new(Mutex::new(Instant::now()));
+        let bytes = Arc::new(Mutex::new(0));
 
-        for (id, proxy) in proxies {
-            let global_range = global_range.clone();
-            let local_range = local_range.clone();
+        start_times.push(start_time.clone());
+        end_times.push(end_time.clone());
+        total_bytes.push(bytes.clone());
 
-            let start_time = Arc::new(Mutex::new(Instant::now()));
-            let end_time = Arc::new(Mutex::new(Instant::now()));
-            let bytes = Arc::new(Mutex::new(0));
-
-            start_times.push(start_time.clone());
-            end_times.push(end_time.clone());
-            total_bytes.push(bytes.clone());
-
-            handles.push(thread::spawn(move || {
-                let rt = tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap();
-                let r = rt.block_on(async {
-                    let r = worker(
-                        proxy,
-                        id,
-                        global_range.clone(),
-                        local_range.clone(),
-                        DURATION,
-                        start_time,
-                        end_time,
-                        bytes,
-                    )
-                    .await;
-                    info!("runtime end: id={}", i);
-                    r
-                });
-                info!("thread end: id={}", i);
+        handles.push(thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let r = rt.block_on(async {
+                let r = worker(
+                    proxy,
+                    id,
+                    global_range.clone(),
+                    local_range.clone(),
+                    DURATION,
+                    start_time,
+                    end_time,
+                    bytes,
+                )
+                .await;
+                info!("runtime end: id={}", id);
                 r
-            }));
-        }
-
-        for handle in handles {
-            if let Err(e) = handle.join().unwrap() {
-                error!("{:?}", e);
-            }
-            info!("join end");
-        }
-
-        info!("start_times: {:?}", start_times);
-        info!("end_times: {:?}", end_times);
-
-        let start = start_times
-            .iter()
-            .map(|x| *x.lock().unwrap())
-            .min()
-            .unwrap();
-        let end = end_times.iter().map(|x| *x.lock().unwrap()).max().unwrap();
-        let elapsed_time = end.duration_since(start).as_secs_f64();
-
-        let total_bytes: usize = total_bytes.iter().map(|x| *x.lock().unwrap()).sum();
-
-        let bandwidth = total_bytes as f64 / elapsed_time;
-
-        let mbytesps = bandwidth / 1024.0 / 1024.0;
-
-        info!("Total bytes: {}", total_bytes);
-        info!("Duration: {:.3} s", elapsed_time);
-        info!("Bandwidth: {:.3} MB/s", mbytesps);
-
-        results.push(mbytesps);
+            });
+            info!("thread end: id={}", id);
+            r
+        }));
     }
 
-    let avg = results.iter().sum::<f64>() / results.len() as f64;
-    let stdev =
-        (results.iter().map(|x| (x - avg) * (x - avg)).sum::<f64>() / results.len() as f64).sqrt();
+    for handle in handles {
+        if let Err(e) = handle.join().unwrap() {
+            error!("{:?}", e);
+        }
+        info!("join end");
+    }
 
-    info!("Average,stdev: {:.3},{:.3}", avg, stdev);
+    info!("start_times: {:?}", start_times);
+    info!("end_times: {:?}", end_times);
+
+    let start = start_times
+        .iter()
+        .map(|x| *x.lock().unwrap())
+        .min()
+        .unwrap();
+    let end = end_times.iter().map(|x| *x.lock().unwrap()).max().unwrap();
+    let elapsed_time = end.duration_since(start).as_secs_f64();
+
+    let total_bytes: usize = total_bytes.iter().map(|x| *x.lock().unwrap()).sum();
+
+    let bandwidth = total_bytes as f64 / elapsed_time;
+
+    let mbytesps = bandwidth / 1024.0 / 1024.0;
+
+    info!("Total bytes: {}", total_bytes);
+    info!("Duration: {:.3} s", elapsed_time);
+    info!("Bandwidth: {:.3} MB/s", mbytesps);
 }
 
 async fn worker(
