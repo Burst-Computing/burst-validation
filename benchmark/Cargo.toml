@@ -19,8 +19,8 @@ name = "send_receive"
 path = "src/send_receive.rs"
 
 [[example]]
-name = "broadcast"
-path = "src/broadcast.rs"
+name = "broadcast_bench"
+path = "src/broadcast_bench.rs"
 
 [[example]]
 name = "shuffle"
@@ -33,3 +33,6 @@ path = "src/pair.rs"
 [[example]]
 name = "gather"
 path = "src/gather.rs"
+
+[dependencies]
+env_logger = "0.10.0"

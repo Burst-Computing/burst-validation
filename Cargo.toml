@@ -1,4 +1,4 @@
 [workspace]
 
 resolver = "2"
-members = ["benchmark", "terasort"]
+members = ["burst-communication-middleware", "benchmark", "terasort"]

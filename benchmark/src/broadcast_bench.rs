@@ -1,13 +1,13 @@
 use std::{
-    ops::Range,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
 
 use burst_communication_middleware::{
-    BurstMiddleware, Middleware, MiddlewareOptions, MiddlewareProxy, RabbitMQMiddleware,
-    RabbitMQOptions, Result,
+    BurstMiddleware, BurstOptions, RabbitMQMImpl, RabbitMQOptions, Result, TokioChannelImpl,
+    TokioChannelOptions,
 };
 use bytes::Bytes;
 use clap::Parser;
@@ -15,9 +15,6 @@ use log::{error, info};
 use tracing_subscriber::{
     fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
-
-const DURATION: u64 = 2;
-const CHUNK_SIZE: usize = 1024 * 1024; // 1 MB
 
 #[derive(Parser, Debug)]
 pub struct Arguments {
@@ -29,39 +26,34 @@ pub struct Arguments {
     )]
     pub rabbitmq_server: String,
 
-    /// Global range start
-    #[arg(required = true)]
-    pub global_range_start: u32,
+    /// Burst ID
+    #[arg(long = "burst-id", required = false, default_value = "broadcast-bench")]
+    pub burst_id: String,
 
-    /// Global range end
-    #[arg(required = true)]
-    pub global_range_end: u32,
+    /// Burst Size
+    #[arg(long = "burst-size", required = true)]
+    pub burst_size: u32,
 
-    /// Local range start
-    #[arg(required = true)]
-    pub local_range_start: u32,
+    /// Groups
+    #[arg(long = "groups", required = false, default_value = "2")]
+    pub groups: u32,
 
-    /// Local range end
-    #[arg(required = true)]
-    pub local_range_end: u32,
+    /// Group id
+    #[arg(long = "group-id", required = true)]
+    pub group_id: String,
 
-    /// Broadcast range start
-    #[arg(required = true)]
-    pub broadcast_range_start: u32,
+    /// Payload size
+    #[arg(long = "payload-size", required = false, default_value = "1048576")] // 1MB
+    pub payload_size: usize,
 
-    /// Broadcast range end
-    #[arg(required = true)]
-    pub broadcast_range_end: u32,
-
-    /// Broadcast group id
-    #[arg(required = true)]
-    pub broadcast_group_id: u32,
+    /// Duration
+    #[arg(long = "duration", required = false, default_value = "2")] // 2 seconds
+    pub duration: u64,
 }
 
 #[tokio::main]
 async fn main() {
     // Setup logging
-
     if let Err(err) = tracing_subscriber::registry()
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
@@ -74,40 +66,40 @@ async fn main() {
 
     info!("{:?}", args);
 
-    let global_range = args.global_range_start..args.global_range_end;
-    let local_range = args.local_range_start..args.local_range_end;
-    let broadcast_range = args.broadcast_range_start..args.broadcast_range_end;
+    if (args.burst_size % 2) != 0 {
+        panic!("Burst size must be even number");
+    }
 
-    let mut handles = vec![];
-    let mut start_times = vec![];
-    let mut end_times = vec![];
-    let mut total_bytes = vec![];
+    let group_size = args.burst_size / args.groups;
 
-    let middleware_options = MiddlewareOptions::new(
-        global_range.clone(),
-        local_range.clone(),
-        broadcast_range.clone(),
-    );
+    let group_ranges = (0..args.groups)
+        .map(|group_id| {
+            (
+                group_id.to_string(),
+                ((group_size * group_id)..((group_size * group_id) + group_size)).collect(),
+            )
+        })
+        .collect::<HashMap<String, HashSet<u32>>>();
 
-    let mut middleware = BurstMiddleware::new(middleware_options.clone());
+    let burst_options =
+        BurstOptions::new(args.burst_id, args.burst_size, group_ranges, args.group_id);
 
-    let rabbitmq_middleware = match RabbitMQMiddleware::new(
-        middleware_options,
-        RabbitMQOptions::new(args.rabbitmq_server.to_string())
-            .ack(true)
-            .build(),
-        args.broadcast_group_id,
+    let channel_options = TokioChannelOptions::new()
+        .broadcast_channel_size(256)
+        .build();
+
+    let rabbitmq_options = RabbitMQOptions::new(args.rabbitmq_server)
+        .durable_queues(true)
+        .ack(true)
+        .build();
+
+    let proxies = match BurstMiddleware::create_proxies::<TokioChannelImpl, RabbitMQMImpl, _, _>(
+        burst_options,
+        channel_options,
+        rabbitmq_options,
     )
     .await
     {
-        Ok(m) => m,
-        Err(e) => {
-            error!("{:?}", e);
-            panic!();
-        }
-    };
-
-    let proxies = match middleware.create_proxies(rabbitmq_middleware).await {
         Ok(p) => p,
         Err(e) => {
             error!("{:?}", e);
@@ -115,10 +107,12 @@ async fn main() {
         }
     };
 
-    for (id, proxy) in proxies {
-        let global_range = global_range.clone();
-        let local_range = local_range.clone();
+    let mut handles = vec![];
+    let mut start_times = vec![];
+    let mut end_times = vec![];
+    let mut total_bytes = vec![];
 
+    for (id, proxy) in proxies {
         let start_time = Arc::new(Mutex::new(Instant::now()));
         let end_time = Arc::new(Mutex::new(Instant::now()));
         let bytes = Arc::new(Mutex::new(0));
@@ -135,10 +129,8 @@ async fn main() {
             let r = rt.block_on(async {
                 let r = worker(
                     proxy,
-                    id,
-                    global_range.clone(),
-                    local_range.clone(),
-                    DURATION,
+                    args.duration,
+                    args.payload_size,
                     start_time,
                     end_time,
                     bytes,
@@ -182,21 +174,17 @@ async fn main() {
 }
 
 async fn worker(
-    middleware: Box<dyn MiddlewareProxy>,
-    id: u32,
-    global_range: Range<u32>,
-    local_range: Range<u32>,
+    burst_middleware: BurstMiddleware,
     duration: u64,
+    payload: usize,
     start_time: Arc<Mutex<Instant>>,
     end_time: Arc<Mutex<Instant>>,
     total_bytes: Arc<Mutex<usize>>,
 ) -> Result<()> {
-    info!(
-        "worker start: id={}, global_range={:?}, local_range={:?}",
-        id, global_range, local_range
-    );
+    let id = burst_middleware.info().worker_id;
+    info!("worker start: id={}", id);
 
-    let data = Bytes::from(vec![b'x'; CHUNK_SIZE]);
+    let data = Bytes::from(vec![b'x'; payload]);
 
     let mut elapsed_time = Duration::new(0, 0);
     let start = Instant::now();
@@ -208,7 +196,7 @@ async fn worker(
     if id == 0 {
         let send = tokio::spawn(async move {
             info!("Thread {} started sending", id);
-            let mut mddwr = middleware;
+            let mddwr = burst_middleware;
             let mut message_counter = 0;
             while elapsed_time < Duration::from_secs(duration) {
                 if let Err(e) = mddwr.broadcast(Some(data.clone())).await {
@@ -233,11 +221,11 @@ async fn worker(
     } else {
         let receive = tokio::spawn(async move {
             info!("Thread {} started receiving", id);
-            let mut mddwr = middleware;
+            let mddwr = burst_middleware;
             let mut received_bytes = 0;
             let mut message_counter = 0;
 
-            while let Ok(Some(msg)) = mddwr.broadcast(None).await {
+            while let Ok(msg) = mddwr.broadcast(None).await {
                 if msg.data.is_empty() {
                     info!("Thread {} received empty message", id);
                     break;
