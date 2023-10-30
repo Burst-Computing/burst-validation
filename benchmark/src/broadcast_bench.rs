@@ -6,7 +6,7 @@ use std::{
 };
 
 use burst_communication_middleware::{
-    BurstMiddleware, BurstOptions, RabbitMQMImpl, RabbitMQOptions, TokioChannelImpl,
+    BurstMiddleware, BurstOptions, RabbitMQMImpl, RabbitMQOptions, Result, TokioChannelImpl,
     TokioChannelOptions,
 };
 use bytes::Bytes;
@@ -15,8 +15,6 @@ use log::{error, info};
 use tracing_subscriber::{
     fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
-
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Parser, Debug)]
 pub struct Arguments {
@@ -29,7 +27,7 @@ pub struct Arguments {
     pub rabbitmq_server: String,
 
     /// Burst ID
-    #[arg(long = "burst-id", required = false, default_value = "shuffle")]
+    #[arg(long = "burst-id", required = false, default_value = "broadcast-bench")]
     pub burst_id: String,
 
     /// Burst Size
@@ -37,7 +35,7 @@ pub struct Arguments {
     pub burst_size: u32,
 
     /// Groups
-    #[arg(long = "groups", required = true)]
+    #[arg(long = "groups", required = false, default_value = "2")]
     pub groups: u32,
 
     /// Group id
@@ -56,7 +54,6 @@ pub struct Arguments {
 #[tokio::main]
 async fn main() {
     // Setup logging
-
     if let Err(err) = tracing_subscriber::registry()
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
@@ -68,6 +65,10 @@ async fn main() {
     let args = Arguments::parse();
 
     info!("{:?}", args);
+
+    if (args.burst_size % 2) != 0 {
+        panic!("Burst size must be even number");
+    }
 
     let group_size = args.burst_size / args.groups;
 
@@ -191,71 +192,61 @@ async fn worker(
     *start_time = start.clone();
     drop(start_time); // Release the lock early
 
-    let mddwr = burst_middleware.clone();
-
-    let send = tokio::spawn(async move {
-        info!("Thread {} started sending", id);
-        let mut message_counter = 0;
-        while elapsed_time < Duration::from_secs(duration) {
-            for receiver_id in 0..mddwr.info().burst_size {
-                if receiver_id == id {
-                    continue;
-                }
-                if let Err(e) = mddwr.send(receiver_id, data.clone()).await {
+    // If id 0, sender
+    if id == 0 {
+        let send = tokio::spawn(async move {
+            info!("Thread {} started sending", id);
+            let mddwr = burst_middleware;
+            let mut message_counter = 0;
+            while elapsed_time < Duration::from_secs(duration) {
+                if let Err(e) = mddwr.broadcast(Some(data.clone())).await {
                     error!("Error: {}", e);
                 }
+                elapsed_time = start.elapsed();
                 message_counter += 1;
+                //info!("elapsed_time: {:?}", elapsed_time)
             }
-            elapsed_time = start.elapsed();
-        }
 
-        info!("Thread {} sent {} messages", id, message_counter);
+            info!("Thread {} sent {} messages", id, message_counter);
 
-        // Signal the end of data transfer to all receivers
-        for receiver_id in 0..mddwr.info().burst_size {
-            if receiver_id == id {
-                continue;
-            }
-            if let Err(e) = mddwr.send(receiver_id, Bytes::new()).await {
+            // Signal the end of data transfer
+            if let Err(e) = mddwr.broadcast(Some(Bytes::new())).await {
                 error!("Error: {}", e);
             }
-        }
 
-        info!("Thread {} finished sending", id);
-    });
+            info!("Thread {} finished sending", id);
+        });
+        send.await?;
+    // If id != 0, receiver
+    } else {
+        let receive = tokio::spawn(async move {
+            info!("Thread {} started receiving", id);
+            let mddwr = burst_middleware;
+            let mut received_bytes = 0;
+            let mut message_counter = 0;
 
-    let receive = tokio::spawn(async move {
-        info!("Thread {} started receiving", id);
-        let mut received_bytes = 0;
-
-        let mut message_counter = 0;
-        let mut num_empty = 0;
-
-        while let Ok(msg) = burst_middleware.recv().await {
-            if msg.data.is_empty() {
-                info!("Thread {} received empty message", id);
-                num_empty += 1;
-                if num_empty == burst_middleware.info().burst_size - 1 {
+            while let Ok(msg) = mddwr.broadcast(None).await {
+                if msg.data.is_empty() {
+                    info!("Thread {} received empty message", id);
                     break;
                 }
+
+                received_bytes += msg.data.len();
+                message_counter += 1;
             }
 
-            received_bytes += msg.data.len();
-            message_counter += 1;
-        }
+            info!("Thread {} received {} messages", id, message_counter);
 
-        info!("Thread {} received {} messages", id, message_counter);
+            let mut total_bytes = total_bytes.lock().unwrap();
+            *total_bytes = received_bytes;
 
-        let mut total_bytes = total_bytes.lock().unwrap();
-        *total_bytes = received_bytes;
+            let mut end_time = end_time.lock().unwrap();
+            *end_time = Instant::now();
 
-        let mut end_time = end_time.lock().unwrap();
-        *end_time = Instant::now();
-
-        info!("Thread {} finished receiving", id);
-    });
-
-    let _ = tokio::join!(send, receive);
+            info!("Thread {} finished receiving", id);
+        });
+        receive.await?;
+    }
 
     info!("worker end: id={}", id);
 

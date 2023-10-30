@@ -6,19 +6,21 @@ edition = "2021"
 
 [dev-dependencies]
 burst-communication-middleware = { path = "../burst-communication-middleware" }
-tokio = { version = "1.32.0", features = ["full"] }
-clap = { version = "4.4.5", features = ["derive"] }
-tracing = "0.1.37"
+tokio = { version = "1.33.0", features = ["full"] }
+clap = { version = "4.4.7", features = ["derive"] }
+tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 bytes = "1.5.0"
+log = "0.4.20"
+
 
 [[example]]
 name = "send_receive"
 path = "src/send_receive.rs"
 
 [[example]]
-name = "broadcast"
-path = "src/broadcast.rs"
+name = "broadcast_bench"
+path = "src/broadcast_bench.rs"
 
 [[example]]
 name = "shuffle"
@@ -27,3 +29,10 @@ path = "src/shuffle.rs"
 [[example]]
 name = "pair"
 path = "src/pair.rs"
+
+[[example]]
+name = "gather"
+path = "src/gather.rs"
+
+[dependencies]
+env_logger = "0.10.0"
