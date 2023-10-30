@@ -11,7 +11,11 @@
             "6c={9@YBlN",
             "MmXuuR$&>@",
             "e2HpZ{KiIG"
-        ]
+        ],
+        "row_size": 100,
+        "mpu_key": "terasort-5m.sorted",
+        "mpu_id": "NmI5MDMxYWItY2JmZi00Zjg2LWFjNzYtMjEyNTVkY2E0MWYzLjQwYzc0YjljLTNjMjQtNDYyOS1hMTg4LWIyZmM5NDQ2ZWJlNg",
+        "tmp_prefix": "tmp/"
     },
     {
         "bucket": "terasort",
@@ -25,7 +29,11 @@
             "6c={9@YBlN",
             "MmXuuR$&>@",
             "e2HpZ{KiIG"
-        ]
+        ],
+        "row_size": 100,
+        "mpu_key": "terasort-5m.sorted",
+        "mpu_id": "NmI5MDMxYWItY2JmZi00Zjg2LWFjNzYtMjEyNTVkY2E0MWYzLjQwYzc0YjljLTNjMjQtNDYyOS1hMTg4LWIyZmM5NDQ2ZWJlNg",
+        "tmp_prefix": "tmp/"
     },
     {
         "bucket": "terasort",
@@ -39,7 +47,11 @@
             "6c={9@YBlN",
             "MmXuuR$&>@",
             "e2HpZ{KiIG"
-        ]
+        ],
+        "row_size": 100,
+        "mpu_key": "terasort-5m.sorted",
+        "mpu_id": "NmI5MDMxYWItY2JmZi00Zjg2LWFjNzYtMjEyNTVkY2E0MWYzLjQwYzc0YjljLTNjMjQtNDYyOS1hMTg4LWIyZmM5NDQ2ZWJlNg",
+        "tmp_prefix": "tmp/"
     },
     {
         "bucket": "terasort",
@@ -53,6 +65,10 @@
             "6c={9@YBlN",
             "MmXuuR$&>@",
             "e2HpZ{KiIG"
-        ]
+        ],
+        "row_size": 100,
+        "mpu_key": "terasort-5m.sorted",
+        "mpu_id": "NmI5MDMxYWItY2JmZi00Zjg2LWFjNzYtMjEyNTVkY2E0MWYzLjQwYzc0YjljLTNjMjQtNDYyOS1hMTg4LWIyZmM5NDQ2ZWJlNg",
+        "tmp_prefix": "tmp/"
     }
 ]

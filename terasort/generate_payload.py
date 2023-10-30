@@ -21,6 +21,7 @@ DEFAULT_START_MARGIN: float = 0.02
 DEFAULT_END_MARGIN: float = 0.02
 DEFUALT_BOUND_EXTRACTION_MARGIN: int = 1024 * 1024
 DEFAULT_PAYLOAD_FILENAME = "sort_payload"
+DEFAULT_TMP_PREFIX = "tmp/"
 
 
 def main():
@@ -28,6 +29,7 @@ def main():
     parser.add_argument("--partitions", type=int, required=True, help="Number of partitions")
     parser.add_argument("--bucket", type=str, required=True, help="Bucket name")
     parser.add_argument("--key", type=str, required=True, help="Object key")
+    parser.add_argument("--sort-output-key", type=str, required=False, help="Sort output key")
     parser.add_argument("--sort-column", type=int, required=True, help="Sort key")
     parser.add_argument("--delimiter", type=str, default=",", help="Delimiter")
     parser.add_argument("--start-margin", type=float, default=DEFAULT_START_MARGIN, help="Start margin")
@@ -40,6 +42,7 @@ def main():
     )
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
     parser.add_argument("--payload-filename", type=str, default=DEFAULT_PAYLOAD_FILENAME, help="Payload filename")
+    parser.add_argument("--tmp-prefix", type=str, default=DEFAULT_TMP_PREFIX, help="Prefix for temorary data in S3")
     args = parser.parse_args()
 
     if args.seed is not None:
@@ -64,6 +67,7 @@ def main():
     selected_fragments = sorted(random.sample(range(num_parts), DEFAULT_SAMPLE_FRAGMENTS))
 
     keys_arrays = []
+    row_lens = []
 
     # Read from each bound a fragment size, adjusting limits
     for f in selected_fragments:
@@ -108,6 +112,12 @@ def main():
         body_memview = memoryview(body)
         partition = body_memview[lower_bound:upper_bound]
 
+        # find index of \n from the beginning of the body
+        buff = BytesIO(partition)
+        row_len = len(buff.readline())
+        buff.seek(0)
+        row_lens.append(row_len)
+
         df = pd.read_csv(
             BytesIO(partition),
             engine="c",
@@ -118,9 +128,11 @@ def main():
             on_bad_lines="warn",
         )
 
-        # print(df)
-
         keys_arrays.append(np.array(df[args.sort_column]))
+
+    # Assert all row lengths are the same
+    assert len(set(row_lens)) == 1
+    row_len = set(row_lens).pop()
 
     # Concat keys, sort them
     keys = np.concatenate(keys_arrays)
@@ -129,6 +141,12 @@ def main():
     # Find quantiles (num tasks)
     quantiles = [i * 1 / args.partitions for i in range(1, args.partitions)]
     segment_bounds = [keys[int(q * len(keys))] for q in quantiles]
+
+    # Generate multipart upload
+    output_key = args.sort_output_key if args.sort_output_key is not None else args.key + ".sorted"
+    mpu_res = s3_client.create_multipart_upload(Bucket=args.bucket, Key=output_key)
+    print(mpu_res)
+    mpu_id = mpu_res["UploadId"]
 
     pprint(segment_bounds)
 
@@ -143,6 +161,10 @@ def main():
             "partitions": args.partitions,
             "partition_idx": i,
             "segment_bounds": segment_bounds,
+            "row_size": row_len,
+            "mpu_key": output_key,
+            "mpu_id": mpu_id,
+            "tmp_prefix": args.tmp_prefix
         }
         for i in range(args.partitions)
     ]
