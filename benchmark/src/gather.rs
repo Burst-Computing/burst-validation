@@ -11,7 +11,7 @@ use burst_communication_middleware::{
 };
 use bytes::Bytes;
 use clap::Parser;
-use log::{error, info};
+use log::{error, info, debug};
 use tracing_subscriber::{
     fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
@@ -45,6 +45,10 @@ pub struct Arguments {
     /// Payload size
     #[arg(long = "payload-size", required = false, default_value = "1048576")] // 1MB
     pub payload_size: usize,
+
+    /// Repeat count
+    #[arg(long = "repeat", required = false, default_value = "256")] // 256MB
+    pub repeat: u32,
 }
 
 #[tokio::main]
@@ -124,7 +128,15 @@ async fn main() {
                 .build()
                 .unwrap();
             let r = rt.block_on(async {
-                let r = worker(proxy, args.payload_size, start_time, end_time, bytes).await;
+                let r = worker(
+                    proxy,
+                    args.payload_size,
+                    args.repeat,
+                    start_time,
+                    end_time,
+                    bytes,
+                )
+                .await;
                 info!("runtime end: id={}", id);
                 r
             });
@@ -165,6 +177,7 @@ async fn main() {
 async fn worker(
     burst_middleware: BurstMiddleware,
     payload: usize,
+    repeat: u32,
     start_time: Arc<Mutex<Instant>>,
     end_time: Arc<Mutex<Instant>>,
     total_bytes: Arc<Mutex<usize>>,
@@ -189,12 +202,35 @@ async fn worker(
             let mut received_bytes = 0;
 
             while let Ok(Some(msgs)) = mddwr.gather(data.clone()).await {
-                info!("Received {} messages: {:?}", msgs.len(), msgs);
+                debug!("Received {} messages: {:?}", msgs.len(), msgs);
 
                 // check if ordered
                 msgs.iter().enumerate().for_each(|(i, msg)| {
                     if msg.sender_id != i as u32 {
                         error!("Received data is not in order: {} != {}", msg.sender_id, i);
+                    }
+                });
+
+                // check if collective is the same for all messages
+                let collective = msgs[0].collective.clone();
+                msgs.iter().for_each(|msg| {
+                    if msg.collective != collective {
+                        error!(
+                            "Received data is not collective: {:?} != {:?}",
+                            msg.collective, collective
+                        );
+                    }
+                });
+
+                // check if counter is the same for all messages
+                let counter = msgs[0].counter.unwrap();
+                msgs.iter().for_each(|msg| {
+                    if msg.counter.unwrap() != counter {
+                        error!(
+                            "Received counter is not the same: {} != {}",
+                            msg.counter.unwrap(),
+                            counter
+                        );
                     }
                 });
 
@@ -226,8 +262,11 @@ async fn worker(
         let send = tokio::spawn(async move {
             info!("Thread {} started sending", id);
             // while elapsed_time < Duration::from_secs(duration) {
-            if let Err(e) = burst_middleware.gather(data.clone()).await {
-                error!("Error: {}", e);
+
+            for _ in 0..repeat {
+                if let Err(e) = burst_middleware.gather(data.clone()).await {
+                    error!("Error: {}", e);
+                }
             }
             // elapsed_time = start.elapsed();
             // info!("elapsed_time: {:?}", elapsed_time)
