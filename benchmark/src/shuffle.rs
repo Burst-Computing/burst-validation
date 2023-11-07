@@ -39,7 +39,7 @@ pub struct Arguments {
     pub group_id: String,
 
     /// Payload size
-    #[arg(long = "payload-size", required = false, default_value = "1048576")] // 1MB
+    #[arg(long = "payload-size", required = false, default_value = "65536")] // 64KB
     pub payload_size: usize,
 
     /// Repeat count
