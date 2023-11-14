@@ -48,7 +48,7 @@ pub struct Arguments {
 #[tokio::main]
 async fn main() {
     env_logger::init();
-    
+
     let args = Arguments::parse();
     info!("{:?}", args);
 
@@ -122,9 +122,13 @@ async fn main() {
         threads.push(thread);
     }
 
+    let mut agg_throughput: f64 = 0.0;
     for thread in threads {
-        thread.join().unwrap();
+        let throughput = thread.join().unwrap();
+        agg_throughput += throughput;
     }
+
+    info!("Total throughput: {} MB/s", agg_throughput as f64);
 
     let t = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -132,27 +136,36 @@ async fn main() {
     info!("end: {}", t.as_millis() as f64 / 1000.0);
 }
 
-async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> Result<()> {
+async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> Result<f64> {
     info!("worker {} start", burst_middleware.info().worker_id);
+    let mut throughput: f64 = 0.0;
 
     if burst_middleware.info().worker_id < (burst_middleware.info().burst_size / 2) {
-        let t0 = Instant::now();
         let mut total_size = 0;
-        for _ in 0..repeat {
+
+        let msg = burst_middleware.recv().await?;
+        total_size += msg.data.len();
+
+        let t0: Instant = Instant::now();
+
+        log::info!(
+            "Worker {} - started receiving",
+            burst_middleware.info().worker_id
+        );
+        for _ in 0..repeat - 1 {
             let msg = burst_middleware.recv().await?;
-            debug!(
-                "Worker {} Received from {}",
-                burst_middleware.info().worker_id,
-                msg.sender_id
-            );
             total_size += msg.data.len();
         }
         let t = t0.elapsed();
+        let size_mb = total_size as f64 / 1024.0 / 1024.0;
+        throughput = size_mb as f64 / (t.as_millis() as f64 / 1000.0);
         info!(
-            "Worker {} - received {} messages in {} s",
+            "Worker {} - received {} MB ({} messages) in {} s ({} MB/s)",
             burst_middleware.info().worker_id,
+            size_mb,
             repeat,
             t.as_millis() as f64 / 1000.0,
+            throughput
         );
     } else {
         let data = Bytes::from(vec![b'x'; payload]);
@@ -167,15 +180,19 @@ async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) 
             burst_middleware.send(target, data.clone()).await?;
         }
         let t = t0.elapsed();
+        let total_size = data.len() * repeat as usize;
+        let size_mb = total_size as f64 / 1024.0 / 1024.0;
+        throughput = size_mb as f64 / (t.as_millis() as f64 / 1000.0);
         info!(
-            "Worker {} - sent {} messages in {} s",
+            "Worker {} - sent {} MB ({} messages) in {} s ({} MB/s)",
             burst_middleware.info().worker_id,
+            size_mb,
             repeat,
             t.as_millis() as f64 / 1000.0,
+            throughput
         );
     }
 
     info!("worker {} end", burst_middleware.info().worker_id);
-
-    Ok(())
+    Ok(throughput)
 }
