@@ -4,7 +4,6 @@ use polars::prelude::{
     CsvReader, CsvWriter, DataFrame, QuoteStyle, SerReader, SerWriter, SortOptions,
 };
 use rusoto_core::Region;
-use rusoto_credential::EnvironmentProvider;
 use rusoto_s3::{GetObjectRequest, S3Client, S3};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{Error, Value};
@@ -26,6 +25,21 @@ struct Input {
     mpu_key: String,
     mpu_id: String,
     tmp_prefix: String,
+    s3_config: S3Config,
+    rabbitmq_config: RabbitMQConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct S3Config {
+    region: String,
+    endpoint: String,
+    aws_access_key_id: String,
+    aws_secret_access_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct RabbitMQConfig {
+    uri: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -40,10 +54,13 @@ async fn sort_reduce(args: Input) -> Output {
     // using abandoned rusoto lib because aws sdk beta sucks and does not work with minio
     let client = rusoto_core::request::HttpClient::new().unwrap();
     let region = Region::Custom {
-        name: "us-east-1".to_string(),
-        endpoint: "http://127.0.0.1:9000".to_string(),
+        name: args.s3_config.region,
+        endpoint: args.s3_config.endpoint,
     };
-    let creds = EnvironmentProvider::default();
+    let creds = rusoto_core::credential::StaticProvider::new_minimal(
+        args.s3_config.aws_access_key_id,
+        args.s3_config.aws_secret_access_key,
+    );
     let s3_client = S3Client::new_with(client, creds, region);
 
     let mut agg_df: Option<DataFrame> = None;
@@ -142,7 +159,7 @@ async fn sort_reduce(args: Input) -> Output {
     }
 }
 
-pub fn ow_main(args: Value) -> Result<Value, Error> {
+pub fn main(args: Value) -> Result<Value, Error> {
     let input: Input = serde_json::from_value(args)?;
 
     // create tokio thread runtime
@@ -156,17 +173,17 @@ pub fn ow_main(args: Value) -> Result<Value, Error> {
 }
 
 // main function acts as a wrapper of what the OW runtime would do
-fn main() {
-    // get input from file, this would be the payload from invokation request of OW
-    let file = File::open("../sort_payload.json").unwrap();
+// fn main() {
+//     // get input from file, this would be the payload from invokation request of OW
+//     let file = File::open("../sort_payload.json").unwrap();
 
-    // parse JSON into array of Input structs
-    let inputs: Vec<Input> = serde_json::from_reader(file).unwrap();
+//     // parse JSON into array of Input structs
+//     let inputs: Vec<Input> = serde_json::from_reader(file).unwrap();
 
-    for input in inputs {
-        match ow_main(serde_json::to_value(input).unwrap()) {
-            Ok(output) => println!("{}", output),
-            Err(e) => println!("{}", e),
-        }
-    }
-}
+//     for input in inputs {
+//         match ow_main(serde_json::to_value(input).unwrap()) {
+//             Ok(output) => println!("{}", output),
+//             Err(e) => println!("{}", e),
+//         }
+//     }
+// }

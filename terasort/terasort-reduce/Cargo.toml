@@ -3,6 +3,7 @@ name = "terasort-mapreduce"
 version = "0.1.0"
 publish = false
 edition = "2021"
+resolver = "2"
 
 [dependencies]
 # aws-config = { git = "https://github.com/awslabs/aws-sdk-rust", branch = "next" }

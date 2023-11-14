@@ -24,62 +24,34 @@ DEFAULT_PAYLOAD_FILENAME = "sort_payload"
 DEFAULT_TMP_PREFIX = "tmp/"
 
 AWS_S3_REGION = "us-east-1"
-AWS_S3_ENDPOINT = "http://storage4-10GBit:9000"
-AWS_ACCESS_KEY_ID = "lab144"
-AWS_SECRET_ACCESS_KEY = "astl1a4b4"
+AWS_S3_ENDPOINT = "http://localhost:9000"
+AWS_ACCESS_KEY_ID = "minioadmin"
+AWS_SECRET_ACCESS_KEY = "minioadmin"
+
+RABBITMQ_URI = "amqp://rabbit:123456@localhost:5672"
 
 
 def main():
     parser = argparse.ArgumentParser(description="Generate Sort input payload")
-    parser.add_argument(
-        "--partitions", type=int, required=True, help="Number of partitions"
-    )
+    parser.add_argument("--partitions", type=int, required=True, help="Number of partitions")
     parser.add_argument("--bucket", type=str, required=True, help="Bucket name")
     parser.add_argument("--key", type=str, required=True, help="Object key")
-    parser.add_argument(
-        "--sort-output-key", type=str, required=False, help="Sort output key"
-    )
+    parser.add_argument("--sort-output-key", type=str, required=False, help="Sort output key")
     parser.add_argument("--sort-column", type=int, required=True, help="Sort key")
     parser.add_argument("--delimiter", type=str, default=",", help="Delimiter")
+    parser.add_argument("--start-margin", type=float, default=DEFAULT_START_MARGIN, help="Start margin")
+    parser.add_argument("--end-margin", type=float, default=DEFAULT_END_MARGIN, help="End margin")
+    parser.add_argument("--sample-ratio", type=float, default=DEFAULT_SAMPLE_RATIO, help="Sample ratio")
+    parser.add_argument("--sample-fragments", type=int, default=DEFAULT_SAMPLE_FRAGMENTS, help="Sample fragments")
+    parser.add_argument("--max-sample-size", type=int, default=DEFAULT_MAX_SAMPLE_SIZE, help="Max sample size")
     parser.add_argument(
-        "--start-margin", type=float, default=DEFAULT_START_MARGIN, help="Start margin"
-    )
-    parser.add_argument(
-        "--end-margin", type=float, default=DEFAULT_END_MARGIN, help="End margin"
-    )
-    parser.add_argument(
-        "--sample-ratio", type=float, default=DEFAULT_SAMPLE_RATIO, help="Sample ratio"
-    )
-    parser.add_argument(
-        "--sample-fragments",
-        type=int,
-        default=DEFAULT_SAMPLE_FRAGMENTS,
-        help="Sample fragments",
-    )
-    parser.add_argument(
-        "--max-sample-size",
-        type=int,
-        default=DEFAULT_MAX_SAMPLE_SIZE,
-        help="Max sample size",
-    )
-    parser.add_argument(
-        "--bound-extraction-margin",
-        type=int,
-        default=DEFUALT_BOUND_EXTRACTION_MARGIN,
-        help="Bound extraction margin",
+        "--bound-margin", type=int, default=DEFUALT_BOUND_EXTRACTION_MARGIN, help="Bound extraction margin"
     )
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
+    parser.add_argument("--payload-filename", type=str, default=DEFAULT_PAYLOAD_FILENAME, help="Payload filename")
+    parser.add_argument("--tmp-prefix", type=str, default=DEFAULT_TMP_PREFIX, help="Prefix for temorary data in S3")
     parser.add_argument(
-        "--payload-filename",
-        type=str,
-        default=DEFAULT_PAYLOAD_FILENAME,
-        help="Payload filename",
-    )
-    parser.add_argument(
-        "--tmp-prefix",
-        type=str,
-        default=DEFAULT_TMP_PREFIX,
-        help="Prefix for temorary data in S3",
+        "--rabbitmq-uri", type=str, default=RABBITMQ_URI, help="RabbitMQ uri for burst indirect communication"
     )
     args = parser.parse_args()
 
@@ -105,9 +77,7 @@ def main():
 
     # Select bounds randomly
     num_parts = int(choosable_size / fragment_size)
-    selected_fragments = sorted(
-        random.sample(range(num_parts), DEFAULT_SAMPLE_FRAGMENTS)
-    )
+    selected_fragments = sorted(random.sample(range(num_parts), DEFAULT_SAMPLE_FRAGMENTS))
 
     keys_arrays = []
     row_lens = []
@@ -117,8 +87,8 @@ def main():
         lower_bound = start_limit + f * fragment_size
         upper_bound = lower_bound + fragment_size
 
-        range_0 = max(0, lower_bound - args.bound_extraction_margin)
-        range_1 = min(obj_size, upper_bound + args.bound_extraction_margin)
+        range_0 = max(0, lower_bound - args.bound_margin)
+        range_1 = min(obj_size, upper_bound + args.bound_margin)
 
         body = s3_client.get_object(
             Bucket=args.bucket,
@@ -186,13 +156,9 @@ def main():
     segment_bounds = [keys[int(q * len(keys))] for q in quantiles]
 
     # Generate multipart upload
-    output_key = (
-        args.sort_output_key
-        if args.sort_output_key is not None
-        else args.key + ".sorted"
-    )
+    output_key = args.sort_output_key if args.sort_output_key is not None else args.key + ".sorted"
     mpu_res = s3_client.create_multipart_upload(Bucket=args.bucket, Key=output_key)
-    print(mpu_res)
+    #print(mpu_res)
     mpu_id = mpu_res["UploadId"]
 
     pprint(segment_bounds)
@@ -218,6 +184,7 @@ def main():
                 "aws_access_key_id": AWS_ACCESS_KEY_ID,
                 "aws_secret_access_key": AWS_SECRET_ACCESS_KEY,
             },
+            "rabbitmq_config": {"uri": args.rabbitmq_uri},
         }
         for i in range(args.partitions)
     ]

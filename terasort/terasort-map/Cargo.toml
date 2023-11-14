@@ -10,7 +10,7 @@ resolver = "2"
 rusoto_core = "0.48.0"
 rusoto_credential = "0.48.0"
 rusoto_s3 = "0.48.0"
-#polars = "0.33.2"
+polars = "0.33.2"
 tokio = { version = "1.20.1", features = ["full"] }
 http = "0.2"
 tracing-subscriber = { version = "0.3.15", features = ["env-filter"] }
