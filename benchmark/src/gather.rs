@@ -27,7 +27,7 @@ pub struct Arguments {
     pub rabbitmq_server: String,
 
     /// Burst ID
-    #[arg(long = "burst-id", required = false, default_value = "broadcast-bench")]
+    #[arg(long = "burst-id", required = false, default_value = "gather")]
     pub burst_id: String,
 
     /// Burst Size
@@ -201,7 +201,8 @@ async fn worker(
             info!("Thread {} started receiving", id);
             let mut received_bytes = 0;
 
-            while let Ok(Some(msgs)) = mddwr.gather(data.clone()).await {
+            loop {
+                let msgs = mddwr.gather(data.clone()).await.unwrap().unwrap();
                 debug!("Received {} messages: {:?}", msgs.len(), msgs);
 
                 // check if ordered

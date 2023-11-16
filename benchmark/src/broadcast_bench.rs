@@ -85,7 +85,7 @@ async fn main() {
         BurstOptions::new(args.burst_id, args.burst_size, group_ranges, args.group_id);
 
     let channel_options = TokioChannelOptions::new()
-        .broadcast_channel_size(256)
+        .broadcast_channel_size(1024 * 1024)
         .build();
 
     let rabbitmq_options = RabbitMQOptions::new(args.rabbitmq_server)
@@ -225,7 +225,8 @@ async fn worker(
             let mut received_bytes = 0;
             let mut message_counter = 0;
 
-            while let Ok(msg) = mddwr.broadcast(None).await {
+            loop {
+                let msg = mddwr.broadcast(None).await.unwrap();
                 if msg.data.is_empty() {
                     info!("Thread {} received empty message", id);
                     break;
