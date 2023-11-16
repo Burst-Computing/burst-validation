@@ -34,5 +34,9 @@ path = "src/pair.rs"
 name = "gather"
 path = "src/gather.rs"
 
+[[example]]
+name = "scatter"
+path = "src/scatter.rs"
+
 [dependencies]
 env_logger = "0.10.0"
