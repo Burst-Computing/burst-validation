@@ -38,5 +38,9 @@ path = "src/gather.rs"
 name = "scatter"
 path = "src/scatter.rs"
 
+[[example]]
+name = "all_to_all"
+path = "src/all_to_all.rs"
+
 [dependencies]
 env_logger = "0.10.0"
