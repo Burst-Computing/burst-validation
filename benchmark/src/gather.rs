@@ -224,12 +224,12 @@ async fn worker(
                 });
 
                 // check if counter is the same for all messages
-                let counter = msgs[0].counter.unwrap();
+                let counter = msgs[0].counter;
                 msgs.iter().for_each(|msg| {
-                    if msg.counter.unwrap() != counter {
+                    if msg.counter != counter {
                         error!(
                             "Received counter is not the same: {} != {}",
-                            msg.counter.unwrap(),
+                            msg.counter,
                             counter
                         );
                     }

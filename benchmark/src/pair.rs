@@ -142,8 +142,9 @@ async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) 
 
     if burst_middleware.info().worker_id < (burst_middleware.info().burst_size / 2) {
         let mut total_size = 0;
-
-        let msg = burst_middleware.recv().await?;
+        let from = burst_middleware.info().worker_id + (burst_middleware.info().burst_size / 2);
+        
+        let msg = burst_middleware.recv(from).await?;
         total_size += msg.data.len();
 
         let t0: Instant = Instant::now();
@@ -153,7 +154,7 @@ async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) 
             burst_middleware.info().worker_id
         );
         for _ in 0..repeat - 1 {
-            let msg = burst_middleware.recv().await?;
+            let msg = burst_middleware.recv(from).await?;
             total_size += msg.data.len();
         }
         let t = t0.elapsed();
