@@ -148,7 +148,7 @@ async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) 
 
     let data = Bytes::from(vec![b'x'; payload]);
 
-    let mut throughput: f64 = 0.0;
+    let throughput;
 
     // If id 0, receiver
     if id == 0 {

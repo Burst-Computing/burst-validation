@@ -12,8 +12,6 @@ use bytes::Bytes;
 use clap::Parser;
 use log::{debug, error, info};
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
 #[derive(Parser, Debug)]
 pub struct Arguments {
     /// RabbitMQ server address
@@ -115,7 +113,7 @@ async fn main() {
                 .build()
                 .unwrap();
             let result = tokio_runtime
-                .block_on(async { worker(proxy, args.payload_size, args.repeat).await.unwrap() });
+                .block_on(async { worker(proxy, args.payload_size, args.repeat).await });
             info!("thread end: id={}", worker_id);
             result
         });
@@ -136,15 +134,15 @@ async fn main() {
     info!("end: {}", t.as_millis() as f64 / 1000.0);
 }
 
-async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> Result<f64> {
+async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> f64 {
     info!("worker {} start", burst_middleware.info().worker_id);
-    let mut throughput: f64 = 0.0;
+    let throughput;
 
     if burst_middleware.info().worker_id < (burst_middleware.info().burst_size / 2) {
         let mut total_size = 0;
         let from = burst_middleware.info().worker_id + (burst_middleware.info().burst_size / 2);
 
-        let msg = burst_middleware.recv(from).await?;
+        let msg = burst_middleware.recv(from).await.unwrap();
         total_size += msg.data.len();
 
         let t0: Instant = Instant::now();
@@ -154,7 +152,7 @@ async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) 
             burst_middleware.info().worker_id
         );
         for _ in 0..repeat - 1 {
-            let msg = burst_middleware.recv(from).await?;
+            let msg = burst_middleware.recv(from).await.unwrap();
             total_size += msg.data.len();
         }
         let t = t0.elapsed();
@@ -178,7 +176,7 @@ async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) 
         );
         let t0 = Instant::now();
         for _ in 0..repeat {
-            burst_middleware.send(target, data.clone()).await?;
+            burst_middleware.send(target, data.clone()).await.unwrap();
         }
         let t = t0.elapsed();
         let total_size = data.len() * repeat as usize;
@@ -195,5 +193,5 @@ async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) 
     }
 
     info!("worker {} end", burst_middleware.info().worker_id);
-    Ok(throughput)
+    throughput
 }

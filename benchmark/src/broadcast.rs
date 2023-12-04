@@ -5,7 +5,7 @@ use std::{
 };
 
 use burst_communication_middleware::{
-    BurstMiddleware, BurstOptions, RabbitMQMImpl, RabbitMQOptions, Result, TokioChannelImpl,
+    BurstMiddleware, BurstOptions, RabbitMQMImpl, RabbitMQOptions, TokioChannelImpl,
     TokioChannelOptions,
 };
 use bytes::Bytes;
@@ -120,7 +120,7 @@ async fn main() {
                 .build()
                 .unwrap();
             let result = tokio_runtime
-                .block_on(async { worker(proxy, args.payload_size, args.repeat).await.unwrap() });
+                .block_on(async { worker(proxy, args.payload_size, args.repeat).await });
             info!("thread end: id={}", worker_id);
             result
         });
@@ -141,13 +141,13 @@ async fn main() {
     info!("end: {}", t.as_millis() as f64 / 1000.0);
 }
 
-async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> Result<f64> {
+async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> f64 {
     let id = burst_middleware.info().worker_id;
     info!("worker start: id={}", id);
 
     let data = Bytes::from(vec![b'x'; payload]);
 
-    let mut throughput: f64 = 0.0;
+    let throughput;
 
     // If id 0, sender
     if id == 0 {
@@ -155,7 +155,10 @@ async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) 
 
         info!("Worker {} - started sending", id);
         for _ in 0..repeat {
-            let _ = burst_middleware.broadcast(Some(data.clone())).await?;
+            burst_middleware
+                .broadcast(Some(data.clone()))
+                .await
+                .unwrap();
         }
 
         let t = t0.elapsed();
@@ -177,7 +180,7 @@ async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) 
 
         info!("Worker {} - started receiving", id);
         for _ in 0..repeat {
-            let msg = burst_middleware.broadcast(None).await?;
+            let msg = burst_middleware.broadcast(None).await.unwrap();
             received_bytes += msg.data.len();
         }
 
@@ -195,5 +198,5 @@ async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) 
     }
 
     info!("worker {} end", id);
-    Ok(throughput)
+    throughput
 }
