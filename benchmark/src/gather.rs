@@ -1,17 +1,16 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
     thread,
-    time::Instant,
+    time::{Instant, SystemTime},
 };
 
 use burst_communication_middleware::{
-    BurstMiddleware, BurstOptions, RabbitMQMImpl, RabbitMQOptions, Result, TokioChannelImpl,
+    BurstMiddleware, BurstOptions, RabbitMQMImpl, RabbitMQOptions, TokioChannelImpl,
     TokioChannelOptions,
 };
 use bytes::Bytes;
 use clap::Parser;
-use log::{error, info, debug};
+use log::{error, info};
 use tracing_subscriber::{
     fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
@@ -108,182 +107,104 @@ async fn main() {
         }
     };
 
-    let mut handles = vec![];
-    let mut start_times = vec![];
-    let mut end_times = vec![];
-    let mut total_bytes = vec![];
+    let t = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap();
+    info!("start: {}", t.as_millis() as f64 / 1000.0);
 
-    for (id, proxy) in proxies {
-        let start_time = Arc::new(Mutex::new(Instant::now()));
-        let end_time = Arc::new(Mutex::new(Instant::now()));
-        let bytes = Arc::new(Mutex::new(0));
-
-        start_times.push(start_time.clone());
-        end_times.push(end_time.clone());
-        total_bytes.push(bytes.clone());
-
-        handles.push(thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_multi_thread()
+    let mut threads = Vec::with_capacity(proxies.len());
+    for (worker_id, proxy) in proxies {
+        let thread = thread::spawn(move || {
+            info!("thread start: id={}", worker_id);
+            let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .unwrap();
-            let r = rt.block_on(async {
-                let r = worker(
-                    proxy,
-                    args.payload_size,
-                    args.repeat,
-                    start_time,
-                    end_time,
-                    bytes,
-                )
-                .await;
-                info!("runtime end: id={}", id);
-                r
-            });
-            info!("thread end: id={}", id);
-            r
-        }));
+            let result = tokio_runtime
+                .block_on(async { worker(proxy, args.payload_size, args.repeat).await });
+            info!("thread end: id={}", worker_id);
+            result
+        });
+        threads.push(thread);
     }
 
-    for handle in handles {
-        if let Err(e) = handle.join().unwrap() {
-            error!("{:?}", e);
-        }
-        info!("join end");
+    let mut agg_throughput: f64 = 0.0;
+    for thread in threads {
+        let throughput = thread.join().unwrap();
+        agg_throughput += throughput;
     }
 
-    info!("start_times: {:?}", start_times);
-    info!("end_times: {:?}", end_times);
+    info!("Total throughput: {} MB/s", agg_throughput as f64);
 
-    let start = start_times
-        .iter()
-        .map(|x| *x.lock().unwrap())
-        .min()
+    let t = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap();
-    let end = end_times.iter().map(|x| *x.lock().unwrap()).max().unwrap();
-    let elapsed_time = end.duration_since(start).as_secs_f64();
-
-    let total_bytes: usize = total_bytes.iter().map(|x| *x.lock().unwrap()).sum();
-
-    let bandwidth = total_bytes as f64 / elapsed_time;
-
-    let mbytesps = bandwidth / 1024.0 / 1024.0;
-
-    info!("Total bytes: {}", total_bytes);
-    info!("Duration: {:.3} s", elapsed_time);
-    info!("Bandwidth: {:.3} MB/s", mbytesps);
+    info!("end: {}", t.as_millis() as f64 / 1000.0);
 }
 
-async fn worker(
-    burst_middleware: BurstMiddleware,
-    payload: usize,
-    repeat: u32,
-    start_time: Arc<Mutex<Instant>>,
-    end_time: Arc<Mutex<Instant>>,
-    total_bytes: Arc<Mutex<usize>>,
-) -> Result<()> {
+async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> f64 {
     let id = burst_middleware.info().worker_id;
     info!("worker start: id={}", id);
 
     let data = Bytes::from(vec![b'x'; payload]);
 
-    //let mut elapsed_time = Duration::new(0, 0);
-    let start = Instant::now();
-    let mut start_time = start_time.lock().unwrap();
-    *start_time = start.clone();
-    drop(start_time); // Release the lock early
-
-    let mddwr = burst_middleware.clone();
+    let mut throughput: f64 = 0.0;
 
     // If id 0, receiver
     if id == 0 {
-        let receive = tokio::spawn(async move {
-            info!("Thread {} started receiving", id);
-            let mut received_bytes = 0;
+        let mut received_bytes = 0;
+        let mut received_messages = 0;
+        let t0: Instant = Instant::now();
 
-            loop {
-                let msgs = mddwr.gather(data.clone()).await.unwrap().unwrap();
-                debug!("Received {} messages: {:?}", msgs.len(), msgs);
+        info!("Worker {} - started receiving", id);
+        for _ in 0..repeat {
+            let msgs = burst_middleware
+                .gather(data.clone())
+                .await
+                .unwrap()
+                .unwrap();
+            // skip the first message (self message)
+            received_messages += msgs.len() - 1;
+            received_bytes += msgs
+                .into_iter()
+                .skip(1)
+                .fold(0, |acc, msg| acc + msg.data.len());
+        }
 
-                // check if ordered
-                msgs.iter().enumerate().for_each(|(i, msg)| {
-                    if msg.sender_id != i as u32 {
-                        error!("Received data is not in order: {} != {}", msg.sender_id, i);
-                    }
-                });
-
-                // check if collective is the same for all messages
-                let collective = msgs[0].collective.clone();
-                msgs.iter().for_each(|msg| {
-                    if msg.collective != collective {
-                        error!(
-                            "Received data is not collective: {:?} != {:?}",
-                            msg.collective, collective
-                        );
-                    }
-                });
-
-                // check if counter is the same for all messages
-                let counter = msgs[0].counter;
-                msgs.iter().for_each(|msg| {
-                    if msg.counter != counter {
-                        error!(
-                            "Received counter is not the same: {} != {}",
-                            msg.counter,
-                            counter
-                        );
-                    }
-                });
-
-                // Check if all empty except mine
-                if msgs.iter().filter(|x| x.data.is_empty()).count()
-                    == (burst_middleware.info().burst_size - 1) as usize
-                {
-                    info!(
-                        "Received {} empty messages",
-                        burst_middleware.info().burst_size - 1
-                    );
-                    break;
-                }
-
-                received_bytes += msgs.iter().map(|x| x.data.len()).sum::<usize>();
-            }
-
-            let mut total_bytes = total_bytes.lock().unwrap();
-            *total_bytes = received_bytes;
-
-            let mut end_time = end_time.lock().unwrap();
-            *end_time = Instant::now();
-
-            info!("Thread {} finished receiving", id);
-        });
-        receive.await?;
+        let t = t0.elapsed();
+        let size_mb = received_bytes as f64 / 1024.0 / 1024.0;
+        throughput = size_mb as f64 / (t.as_millis() as f64 / 1000.0);
+        info!(
+            "Worker {} - received {} MB ({} messages) in {} s ({} MB/s)",
+            id,
+            size_mb,
+            received_messages,
+            t.as_millis() as f64 / 1000.0,
+            throughput
+        );
     // If id != 0, sender
     } else {
-        let send = tokio::spawn(async move {
-            info!("Thread {} started sending", id);
-            // while elapsed_time < Duration::from_secs(duration) {
+        let t0: Instant = Instant::now();
 
-            for _ in 0..repeat {
-                if let Err(e) = burst_middleware.gather(data.clone()).await {
-                    error!("Error: {}", e);
-                }
-            }
-            // elapsed_time = start.elapsed();
-            // info!("elapsed_time: {:?}", elapsed_time)
-            // }
+        info!("Thread {} started sending", id);
+        for _ in 0..repeat {
+            burst_middleware.gather(data.clone()).await.unwrap();
+        }
 
-            // Signal the end of data transfer
-            if let Err(e) = burst_middleware.gather(Bytes::new()).await {
-                error!("Error: {}", e);
-            }
-
-            info!("Thread {} finished sending", id);
-        });
-        send.await?;
+        let t = t0.elapsed();
+        let total_size = data.len() * repeat as usize;
+        let size_mb = total_size as f64 / 1024.0 / 1024.0;
+        throughput = size_mb as f64 / (t.as_millis() as f64 / 1000.0);
+        info!(
+            "Worker {} - sent {} MB ({} messages) in {} s ({} MB/s)",
+            id,
+            size_mb,
+            repeat,
+            t.as_millis() as f64 / 1000.0,
+            throughput
+        );
     }
 
-    info!("worker end: id={}", id);
-
-    Ok(())
+    info!("worker {} end", id);
+    throughput
 }
