@@ -19,8 +19,8 @@ name = "send_receive"
 path = "src/send_receive.rs"
 
 [[example]]
-name = "broadcast_bench"
-path = "src/broadcast_bench.rs"
+name = "broadcast"
+path = "src/broadcast.rs"
 
 [[example]]
 name = "shuffle"
