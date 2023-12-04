@@ -26,7 +26,7 @@ pub struct Arguments {
     pub rabbitmq_server: String,
 
     /// Burst ID
-    #[arg(long = "burst-id", required = false, default_value = "gather")]
+    #[arg(long = "burst-id", required = false, default_value = "scatter")]
     pub burst_id: String,
 
     /// Burst Size
@@ -158,7 +158,7 @@ async fn worker(burst_middleware: BurstMiddleware, burst_size: u32, payload: usi
         
         let t0: Instant = Instant::now();
 
-        info!("Worker {} - started receiving", id);
+        info!("Worker {} - started sending", id);
         for _ in 0..repeat {
             burst_middleware
                 .scatter(Some(data.clone()))
