@@ -1,12 +1,11 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
     thread,
-    time::Instant,
+    time::{Instant, SystemTime},
 };
 
 use burst_communication_middleware::{
-    BurstMiddleware, BurstOptions, RabbitMQMImpl, RabbitMQOptions, Result, TokioChannelImpl,
+    BurstMiddleware, BurstOptions, RabbitMQMImpl, RabbitMQOptions, TokioChannelImpl,
     TokioChannelOptions,
 };
 use bytes::Bytes;
@@ -27,7 +26,7 @@ pub struct Arguments {
     pub rabbitmq_server: String,
 
     /// Burst ID
-    #[arg(long = "burst-id", required = false, default_value = "scatter")]
+    #[arg(long = "burst-id", required = false, default_value = "gather")]
     pub burst_id: String,
 
     /// Burst Size
@@ -108,148 +107,105 @@ async fn main() {
         }
     };
 
-    let mut handles = vec![];
-    let mut start_times = vec![];
-    let mut end_times = vec![];
-    let mut total_bytes = vec![];
+    let t = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap();
+    info!("start: {}", t.as_millis() as f64 / 1000.0);
 
-    for (id, proxy) in proxies {
-        let start_time = Arc::new(Mutex::new(Instant::now()));
-        let end_time = Arc::new(Mutex::new(Instant::now()));
-        let bytes = Arc::new(Mutex::new(0));
-
-        start_times.push(start_time.clone());
-        end_times.push(end_time.clone());
-        total_bytes.push(bytes.clone());
-
-        handles.push(thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_multi_thread()
+    let mut threads = Vec::with_capacity(proxies.len());
+    for (worker_id, proxy) in proxies {
+        let thread = thread::spawn(move || {
+            info!("thread start: id={}", worker_id);
+            let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .unwrap();
-            let r = rt.block_on(async {
-                let r = worker(
-                    proxy,
-                    args.payload_size,
-                    args.repeat,
-                    start_time,
-                    end_time,
-                    bytes,
-                )
-                .await;
-                info!("runtime end: id={}", id);
-                r
-            });
-            info!("thread end: id={}", id);
-            r
-        }));
+            let result = tokio_runtime
+                .block_on(async { worker(proxy, args.burst_size, args.payload_size, args.repeat).await });
+            info!("thread end: id={}", worker_id);
+            result
+        });
+        threads.push(thread);
     }
 
-    for handle in handles {
-        if let Err(e) = handle.join().unwrap() {
-            error!("{:?}", e);
-        }
-        info!("join end");
+    let mut agg_throughput: f64 = 0.0;
+    for thread in threads {
+        let throughput = thread.join().unwrap();
+        agg_throughput += throughput;
     }
 
-    info!("start_times: {:?}", start_times);
-    info!("end_times: {:?}", end_times);
+    info!("Total throughput: {} MB/s", agg_throughput as f64);
 
-    let start = start_times
-        .iter()
-        .map(|x| *x.lock().unwrap())
-        .min()
+    let t = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap();
-    let end = end_times.iter().map(|x| *x.lock().unwrap()).max().unwrap();
-    let elapsed_time = end.duration_since(start).as_secs_f64();
-
-    let total_bytes: usize = total_bytes.iter().map(|x| *x.lock().unwrap()).sum();
-
-    let bandwidth = total_bytes as f64 / elapsed_time;
-
-    let mbytesps = bandwidth / 1024.0 / 1024.0;
-
-    info!("Total bytes: {}", total_bytes);
-    info!("Duration: {:.3} s", elapsed_time);
-    info!("Bandwidth: {:.3} MB/s", mbytesps);
+    info!("end: {}", t.as_millis() as f64 / 1000.0);
 }
 
-async fn worker(
-    burst_middleware: BurstMiddleware,
-    payload: usize,
-    repeat: u32,
-    start_time: Arc<Mutex<Instant>>,
-    end_time: Arc<Mutex<Instant>>,
-    total_bytes: Arc<Mutex<usize>>,
-) -> Result<()> {
+async fn worker(burst_middleware: BurstMiddleware, burst_size: u32, payload: usize, repeat: u32) -> f64 {
     let id = burst_middleware.info().worker_id;
     info!("worker start: id={}", id);
 
-    //let mut elapsed_time = Duration::new(0, 0);
-    let start = Instant::now();
-    let mut start_time = start_time.lock().unwrap();
-    *start_time = start.clone();
-    drop(start_time); // Release the lock early
+    let throughput;
 
-    let mddwr = burst_middleware.clone();
-
-    // If id 0, sender
+    // If id 0, receiver
     if id == 0 {
-        let receive = tokio::spawn(async move {
-            info!("Thread {} started sending", id);
-            let data = (0..burst_middleware.info().burst_size - 1)
-                .map(|_| Bytes::from(vec![b'x'; payload]))
-                .collect::<Vec<Bytes>>();
 
-            for _ in 0..repeat {
-                mddwr.scatter(Some(data.clone())).await.unwrap();
-            }
+        let mut data = Vec::with_capacity((burst_size - 1).try_into().unwrap());
+        for _ in 0..burst_size - 1 {
+            data.push(Bytes::from(vec![b'x'; payload]));
+        }
+        
+        let t0: Instant = Instant::now();
 
-            let data = (0..burst_middleware.info().burst_size - 1)
-                .map(|_| Bytes::new())
-                .collect::<Vec<Bytes>>();
-            // Signal the end of data transfer
-            if let Err(e) = mddwr.scatter(Some(data)).await {
-                error!("Error: {}", e);
-            }
+        info!("Worker {} - started receiving", id);
+        for _ in 0..repeat {
+            burst_middleware
+                .scatter(Some(data.clone()))
+                .await
+                .unwrap();
+        }
 
-            info!("Thread {} finished sending", id);
-        });
-        receive.await?;
-    // If id != 0, receiver
+        let t = t0.elapsed();
+        let size_mb = data.len() as f64 * repeat as f64;
+        throughput = size_mb as f64 / (t.as_millis() as f64 / 1000.0);
+        info!(
+            "Worker {} - sent {} MB ({} messages) in {} s ({} MB/s)",
+            id,
+            size_mb,
+            repeat * (burst_size - 1),
+            t.as_millis() as f64 / 1000.0,
+            throughput
+        );
+    // If id != 0, sender
     } else {
-        let send = tokio::spawn(async move {
-            info!("Thread {} started receiving", id);
+        let mut received_bytes = 0;
+        let t0: Instant = Instant::now();
 
-            let mut received_bytes = 0;
-            let mut received_messages = 0;
+        info!("Worker {} - started receiving", id);
+        for _ in 0..repeat {
+            let msgs = burst_middleware
+                .scatter(None)
+                .await
+                .unwrap()
+                .unwrap();
 
-            loop {
-                let msg = burst_middleware.scatter(None).await.unwrap().unwrap();
-                if msg.data.is_empty() {
-                    break;
-                }
-                received_bytes += msg.data.len();
-                received_messages += 1;
-            }
+                received_bytes += msgs.data.len();
+        }
 
-            let mut total_bytes = total_bytes.lock().unwrap();
-            *total_bytes = received_bytes;
-
-            let mut end_time = end_time.lock().unwrap();
-            *end_time = Instant::now();
-
-            info!(
-                "Thread {} received {} bytes in {} messages",
-                id, received_bytes, received_messages
-            );
-
-            info!("Thread {} finished receiving", id);
-        });
-        send.await?;
+        let t = t0.elapsed();
+        let size_mb = received_bytes as f64 / 1024.0 / 1024.0;
+        throughput = size_mb as f64 / (t.as_millis() as f64 / 1000.0);
+        info!(
+            "Worker {} - received {} MB ({} messages) in {} s ({} MB/s)",
+            id,
+            size_mb,
+            repeat,
+            t.as_millis() as f64 / 1000.0,
+            throughput
+        );
     }
 
-    info!("worker end: id={}", id);
-
-    Ok(())
+    info!("worker {} end", id);
+    throughput
 }
