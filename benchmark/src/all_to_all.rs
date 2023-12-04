@@ -1,20 +1,19 @@
+use std::{
+    collections::{HashMap, HashSet},
+    thread,
+    time::{Instant, SystemTime},
+};
+
 use burst_communication_middleware::{
     BurstMiddleware, BurstOptions, RabbitMQMImpl, RabbitMQOptions, TokioChannelImpl,
     TokioChannelOptions,
 };
 use bytes::Bytes;
 use clap::Parser;
-use std::{
-    collections::{HashMap, HashSet},
-    thread,
-    time::SystemTime,
-};
-use tracing::{error, info};
+use log::{error, info};
 use tracing_subscriber::{
     fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
-
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Parser, Debug)]
 pub struct Arguments {
@@ -53,14 +52,23 @@ pub struct Arguments {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::registry()
+    // Setup logging
+
+    if let Err(err) = tracing_subscriber::registry()
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
         .try_init()
-        .unwrap();
+    {
+        eprintln!("Failed to initialize logging: {}", err);
+    }
 
     let args = Arguments::parse();
+
     info!("{:?}", args);
+
+    if (args.burst_size % 2) != 0 {
+        panic!("Burst size must be even number");
+    }
 
     let group_size = args.burst_size / args.groups;
 
@@ -113,16 +121,20 @@ async fn main() {
                 .build()
                 .unwrap();
             let result = tokio_runtime
-                .block_on(async { worker(proxy, args.payload_size, args.repeat).await.unwrap() });
+                .block_on(async { worker(proxy, args.payload_size, args.repeat).await });
             info!("thread end: id={}", worker_id);
             result
         });
         threads.push(thread);
     }
 
+    let mut agg_throughput: f64 = 0.0;
     for thread in threads {
-        thread.join().unwrap();
+        let throughput = thread.join().unwrap();
+        agg_throughput += throughput;
     }
+
+    info!("Total throughput: {} MB/s", agg_throughput as f64);
 
     let t = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -130,42 +142,40 @@ async fn main() {
     info!("end: {}", t.as_millis() as f64 / 1000.0);
 }
 
-async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> Result<()> {
-    info!("worker start: id={}", burst_middleware.info().worker_id);
+async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> f64 {
+    let id = burst_middleware.info().worker_id;
+    info!("worker start: id={}", id);
+
+    let mut received_bytes = 0;
+    let mut received_messages = 0;
+    let throughput;
 
     let data = (0..burst_middleware.info().burst_size)
         .map(|_| Bytes::from(vec![b'x'; payload]))
         .collect::<Vec<Bytes>>();
 
-    for i in 0..repeat {
-        info!("Worker {} - Iteration {}", burst_middleware.info().worker_id, i);
-        let msgs = burst_middleware.all_to_all(data.clone()).await?;
+    let t0: Instant = Instant::now();
 
-        if msgs.len() != burst_middleware.info().burst_size as usize {
-            error!(
-                "invalid message size: {} != {}",
-                msgs.len(),
-                burst_middleware.info().burst_size - 1
-            );
-            panic!();
-        }
+    info!("Worker {} - started sending & receiving", id);
+    for _ in 0..repeat {
+        let msgs = burst_middleware.all_to_all(data.clone()).await.unwrap();
 
-        for msg in &msgs {
-            if msg.data.len() != payload {
-                error!("invalid payload size: {}", msg.data.len());
-                panic!();
-            }
-        }
-
-        // check if ordered
-        msgs.iter().enumerate().for_each(|(i, msg)| {
-            if msg.sender_id != i as u32 {
-                error!("Received data is not in order: {} != {}", msg.sender_id, i);
-            }
-        });
+        received_messages += msgs.len();
+        received_bytes += msgs.into_iter().fold(0, |acc, msg| acc + msg.data.len());
     }
+    let t = t0.elapsed();
+    let size_mb = received_bytes as f64 / 1024.0 / 1024.0;
+    throughput = size_mb as f64 / (t.as_millis() as f64 / 1000.0);
+    info!(
+        "Worker {} - received {} MB ({} messages) in {} s (latency: {} s, throughput {} MB/s)",
+        id,
+        size_mb,
+        received_messages,
+        t.as_millis() as f64 / 1000.0,
+        t.as_millis() as f64 / 1000.0 / repeat as f64,
+        throughput
+    );
 
-    info!("worker end: id={}", burst_middleware.info().worker_id);
-
-    Ok(())
+    info!("worker {} end", id);
+    throughput
 }

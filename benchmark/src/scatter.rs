@@ -148,13 +148,12 @@ async fn worker(burst_middleware: BurstMiddleware, burst_size: u32, payload: usi
 
     let throughput;
 
-    // If id 0, receiver
+    // If id 0, sender
     if id == 0 {
 
-        let mut data = Vec::with_capacity((burst_size - 1).try_into().unwrap());
-        for _ in 0..burst_size - 1 {
-            data.push(Bytes::from(vec![b'x'; payload]));
-        }
+        let data = (0..burst_middleware.info().burst_size - 1)
+        .map(|_| Bytes::from(vec![b'x'; payload]))
+        .collect::<Vec<Bytes>>();
         
         let t0: Instant = Instant::now();
 
@@ -170,14 +169,15 @@ async fn worker(burst_middleware: BurstMiddleware, burst_size: u32, payload: usi
         let size_mb = data.len() as f64 * repeat as f64;
         throughput = size_mb as f64 / (t.as_millis() as f64 / 1000.0);
         info!(
-            "Worker {} - sent {} MB ({} messages) in {} s ({} MB/s)",
+            "Worker {} - sent {} MB ({} messages) in {} s (latency: {} s, throughput {} MB/s)",
             id,
             size_mb,
             repeat * (burst_size - 1),
             t.as_millis() as f64 / 1000.0,
+            t.as_millis() as f64 / 1000.0 / repeat as f64,
             throughput
         );
-    // If id != 0, sender
+    // If id != 0, receiver
     } else {
         let mut received_bytes = 0;
         let t0: Instant = Instant::now();
@@ -197,11 +197,12 @@ async fn worker(burst_middleware: BurstMiddleware, burst_size: u32, payload: usi
         let size_mb = received_bytes as f64 / 1024.0 / 1024.0;
         throughput = size_mb as f64 / (t.as_millis() as f64 / 1000.0);
         info!(
-            "Worker {} - received {} MB ({} messages) in {} s ({} MB/s)",
+            "Worker {} - received {} MB ({} messages) in {} s (latency: {} s, throughput {} MB/s)",
             id,
             size_mb,
             repeat,
             t.as_millis() as f64 / 1000.0,
+            t.as_millis() as f64 / 1000.0 / repeat as f64,
             throughput
         );
     }

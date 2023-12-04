@@ -26,7 +26,7 @@ pub struct Arguments {
     pub rabbitmq_server: String,
 
     /// Burst ID
-    #[arg(long = "burst-id", required = false, default_value = "broadcast-bench")]
+    #[arg(long = "burst-id", required = false, default_value = "broadcast")]
     pub burst_id: String,
 
     /// Burst Size
@@ -166,11 +166,12 @@ async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) 
         let size_mb = total_size as f64 / 1024.0 / 1024.0;
         throughput = size_mb as f64 / (t.as_millis() as f64 / 1000.0);
         info!(
-            "Worker {} - sent {} MB ({} messages) in {} s ({} MB/s)",
+            "Worker {} - sent {} MB ({} messages) in {} s (latency: {} s, throughput {} MB/s)",
             id,
             size_mb,
             repeat,
             t.as_millis() as f64 / 1000.0,
+            t.as_millis() as f64 / 1000.0 / repeat as f64,
             throughput
         );
     // If id != 0, receiver
@@ -188,11 +189,12 @@ async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) 
         let size_mb = received_bytes as f64 / 1024.0 / 1024.0;
         throughput = size_mb as f64 / (t.as_millis() as f64 / 1000.0);
         info!(
-            "Worker {} - received {} MB ({} messages) in {} s ({} MB/s)",
+            "Worker {} - received {} MB ({} messages) in {} s (latency: {} s, throughput {} MB/s)",
             id,
             size_mb,
             repeat,
             t.as_millis() as f64 / 1000.0,
+            t.as_millis() as f64 / 1000.0 / repeat as f64,
             throughput
         );
     }
