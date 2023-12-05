@@ -142,13 +142,16 @@ async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) 
         let mut total_size = 0;
         let from = burst_middleware.info().worker_id + (burst_middleware.info().burst_size / 2);
 
+        let msg = burst_middleware.recv(from).await.unwrap();
+        total_size += msg.data.len();
+
         let t0: Instant = Instant::now();
 
         log::info!(
             "Worker {} - started receiving",
             burst_middleware.info().worker_id
         );
-        for _ in 0..repeat {
+        for _ in 0..repeat - 1 {
             let msg = burst_middleware.recv(from).await.unwrap();
             total_size += msg.data.len();
         }
