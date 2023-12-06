@@ -1,7 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt::{Display, Formatter},
+    fs::OpenOptions,
     future::Future,
+    path::Path,
     thread::{self, JoinHandle},
 };
 
@@ -297,12 +299,16 @@ pub async fn create_proxies(args: &Arguments) -> HashMap<u32, BurstMiddleware> {
     proxies
 }
 
-pub fn setup_logging() {
-    if let Err(err) = tracing_subscriber::registry()
+pub fn setup_logging(log: impl AsRef<Path>) {
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open(log)
+        .unwrap();
+    tracing_subscriber::registry()
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with(fmt::layer().with_writer(file).with_ansi(false))
         .with(fmt::layer())
-        .with(EnvFilter::from_default_env())
-        .try_init()
-    {
-        eprintln!("Failed to initialize logging: {}", err);
-    }
+        .init();
 }

@@ -25,9 +25,15 @@ struct Record {
 
 #[tokio::main]
 async fn main() {
-    setup_logging();
-
     let args = Arguments::parse();
+
+    let datetime = format!("{}", chrono::Local::now().format("%Y-%m-%d-%H-%M-%S"));
+    let log = Path::new("results")
+        .join(&datetime)
+        .join(format!("group_{}.log", args.group_id));
+    fs::create_dir_all(log.parent().unwrap()).unwrap();
+
+    setup_logging(log);
     info!("{:?}", args);
 
     if (args.burst_size % 2) != 0 {
@@ -62,17 +68,15 @@ async fn main() {
     };
 
     // append to csv in results directory (create if doesn't exist)
-    let datetime = format!("{}", chrono::Local::now().format("%d-%m-%Y_%H-%M-%S"));
-    let path = Path::new("results")
-        .join(datetime)
+    let csv = Path::new("results")
+        .join(&datetime)
         .join(format!("group_{}.csv", args.group_id));
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
     let mut writer = Writer::from_writer(
         OpenOptions::new()
             .write(true)
             .append(true)
             .create(true)
-            .open(path)
+            .open(csv)
             .unwrap(),
     );
 
