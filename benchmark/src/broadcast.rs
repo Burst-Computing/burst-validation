@@ -3,12 +3,13 @@ use bytes::Bytes;
 use log::info;
 use std::time::Instant;
 
-pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> f64 {
+pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> (f64, f64) {
     let id = burst_middleware.info().worker_id;
     info!("worker start: id={}", id);
 
     let data = Bytes::from(vec![b'x'; payload]);
 
+    let latency;
     let throughput;
 
     // If id 0, sender
@@ -26,6 +27,7 @@ pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u
         let t = t0.elapsed();
         let total_size = data.len() * repeat as usize;
         let size_mb = total_size as f64 / 1024.0 / 1024.0;
+        latency = t.as_millis() as f64 / repeat as f64 / 1000.0;
         throughput = size_mb as f64 / (t.as_millis() as f64 / 1000.0);
         info!(
             "Worker {} - sent {} MB ({} messages) in {} s (latency: {} s, throughput {} MB/s)",
@@ -33,7 +35,7 @@ pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u
             size_mb,
             repeat,
             t.as_millis() as f64 / 1000.0,
-            t.as_millis() as f64 / 1000.0 / repeat as f64,
+            latency,
             throughput
         );
     // If id != 0, receiver
@@ -49,6 +51,7 @@ pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u
 
         let t = t0.elapsed();
         let size_mb = received_bytes as f64 / 1024.0 / 1024.0;
+        latency = t.as_millis() as f64 / repeat as f64 / 1000.0;
         throughput = size_mb as f64 / (t.as_millis() as f64 / 1000.0);
         info!(
             "Worker {} - received {} MB ({} messages) in {} s (latency: {} s, throughput {} MB/s)",
@@ -56,11 +59,11 @@ pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u
             size_mb,
             repeat,
             t.as_millis() as f64 / 1000.0,
-            t.as_millis() as f64 / 1000.0 / repeat as f64,
+            latency,
             throughput
         );
     }
 
     info!("worker {} end", id);
-    throughput
+    (latency, throughput)
 }

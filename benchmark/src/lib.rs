@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    fmt::{Display, Formatter},
     future::Future,
     thread::{self, JoinHandle},
 };
@@ -95,6 +96,32 @@ pub enum Backend {
     MessageRelay,
 }
 
+impl Display for Backend {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Backend::S3 {
+                bucket: _,
+                region: _,
+                access_key_id: _,
+                secret_access_key: _,
+                session_token: _,
+            } => {
+                write!(f, "S3")?;
+            }
+            Backend::Redis => {
+                write!(f, "Redis")?;
+            }
+            Backend::Rabbitmq => {
+                write!(f, "RabbitMQ")?;
+            }
+            Backend::MessageRelay => {
+                write!(f, "BurstMessageRelay")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, ValueEnum)]
 pub enum Benchmark {
     /// Run pair benchmark
@@ -109,28 +136,54 @@ pub enum Benchmark {
     AllToAll,
 }
 
-pub fn create_threads<F, Fut>(
-    args: Arguments,
+impl Display for Benchmark {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Benchmark::Pair => {
+                write!(f, "Pair")?;
+            }
+            Benchmark::Broadcast => {
+                write!(f, "Broadcast")?;
+            }
+            Benchmark::Scatter => {
+                write!(f, "Scatter")?;
+            }
+            Benchmark::Gather => {
+                write!(f, "Gather")?;
+            }
+            Benchmark::AllToAll => {
+                write!(f, "AllToAll")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+pub fn create_threads<F, Fut, O>(
+    args: &Arguments,
     proxies: HashMap<u32, BurstMiddleware>,
     f: F,
-) -> Vec<JoinHandle<f64>>
+) -> HashMap<u32, JoinHandle<O>>
 where
     F: FnOnce(BurstMiddleware, usize, u32) -> Fut + Copy + Send + 'static,
-    Fut: Future<Output = f64> + Send + 'static,
+    Fut: Future<Output = O> + Send + 'static,
+    O: Send + 'static,
 {
-    let mut threads = Vec::with_capacity(proxies.len());
+    let mut threads = HashMap::with_capacity(proxies.len());
     for (worker_id, proxy) in proxies {
+        let payload_size = args.payload_size;
+        let repeat = args.repeat;
         let thread = thread::spawn(move || {
             info!("thread start: id={}", worker_id);
             let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .unwrap();
-            let result = tokio_runtime.block_on(f(proxy, args.payload_size, args.repeat));
+            let result = tokio_runtime.block_on(f(proxy, payload_size, repeat));
             info!("thread end: id={}", worker_id);
             result
         });
-        threads.push(thread);
+        threads.insert(worker_id, thread);
     }
     threads
 }
