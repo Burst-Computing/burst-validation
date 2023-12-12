@@ -3,12 +3,15 @@ use bytes::Bytes;
 use log::info;
 use std::time::Instant;
 
-pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> (f64, f64) {
+use crate::{get_timestamp, Out};
+
+pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> Out {
     let id = burst_middleware.info().worker_id;
     info!("worker start: id={}", id);
 
     let latency;
     let throughput;
+    let start = get_timestamp();
 
     // If id 0, sender
     if id == 0 {
@@ -64,5 +67,13 @@ pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u
     }
 
     info!("worker {} end", id);
-    (latency, throughput)
+
+    let end = get_timestamp();
+
+    Out {
+        latency,
+        throughput,
+        start,
+        end,
+    }
 }

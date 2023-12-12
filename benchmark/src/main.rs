@@ -2,7 +2,7 @@ use std::{fs, path::Path, time::SystemTime};
 
 use benchmark::{
     all_to_all, broadcast, create_proxies, create_threads, gather, pair, scatter, setup_logging,
-    Arguments, Benchmark,
+    Arguments, Benchmark, Out,
 };
 use clap::Parser;
 use csv::Writer;
@@ -21,6 +21,8 @@ struct Record {
     worker_id: u32,
     latency: f64,
     throughput: f64,
+    start: f64,
+    end: f64,
 }
 
 #[tokio::main]
@@ -83,7 +85,13 @@ async fn main() {
     let mut total_latency: f64 = 0.0;
     let mut agg_throughput: f64 = 0.0;
     for (worker_id, thread) in threads {
-        let (latency, throughput) = thread.join().unwrap();
+        let Out {
+            latency,
+            throughput,
+            start,
+            end,
+        } = thread.join().unwrap();
+
         total_latency += latency;
         agg_throughput += throughput;
 
@@ -97,6 +105,8 @@ async fn main() {
             worker_id,
             latency,
             throughput,
+            start,
+            end,
         };
 
         writer.serialize(record).unwrap();

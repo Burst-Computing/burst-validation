@@ -3,10 +3,13 @@ use bytes::Bytes;
 use log::{debug, info};
 use std::time::Instant;
 
-pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> (f64, f64) {
+use crate::{get_timestamp, Out};
+
+pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> Out {
     info!("worker {} start", burst_middleware.info().worker_id);
     let latency;
     let throughput;
+    let start = get_timestamp();
 
     // If id < burst_size / 2, receiver
     if burst_middleware.info().worker_id < (burst_middleware.info().burst_size / 2) {
@@ -69,5 +72,13 @@ pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u
     }
 
     info!("worker {} end", burst_middleware.info().worker_id);
-    (latency, throughput)
+
+    let end = get_timestamp();
+
+    Out {
+        latency,
+        throughput,
+        start,
+        end,
+    }
 }

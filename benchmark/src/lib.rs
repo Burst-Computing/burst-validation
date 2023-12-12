@@ -5,6 +5,7 @@ use std::{
     future::Future,
     path::Path,
     thread::{self, JoinHandle},
+    time::SystemTime,
 };
 
 use burst_communication_middleware::{
@@ -68,6 +69,13 @@ pub struct Arguments {
         default_value = "1048576"
     )]
     pub tokio_broadcast_channel_size: usize,
+}
+
+pub struct Out {
+    pub latency: f64,
+    pub throughput: f64,
+    pub start: f64,
+    pub end: f64,
 }
 
 #[derive(Debug, Subcommand)]
@@ -311,4 +319,12 @@ pub fn setup_logging(log: impl AsRef<Path>) {
         .with(fmt::layer().with_writer(file).with_ansi(false))
         .with(fmt::layer())
         .init();
+}
+
+pub fn get_timestamp() -> f64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as f64
+        / 1000.0
 }
