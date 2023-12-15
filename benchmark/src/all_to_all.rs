@@ -19,10 +19,14 @@ pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u
         .map(|_| Bytes::from(vec![b'x'; payload]))
         .collect::<Vec<Bytes>>();
 
+    let msgs = burst_middleware.all_to_all(data.clone()).await.unwrap();
+    received_messages += msgs.len();
+    received_bytes += msgs.into_iter().fold(0, |acc, msg| acc + msg.data.len());    
+
     let t0: Instant = Instant::now();
 
     info!("Worker {} - started sending & receiving", id);
-    for _ in 0..repeat {
+    for _ in 0..repeat - 1 {
         let msgs = burst_middleware.all_to_all(data.clone()).await.unwrap();
 
         received_messages += msgs.len();

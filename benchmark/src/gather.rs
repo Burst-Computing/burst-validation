@@ -19,10 +19,22 @@ pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u
     if id == 0 {
         let mut received_bytes = 0;
         let mut received_messages = 0;
+
+        let msgs = burst_middleware
+            .gather(data.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        received_messages += msgs.len() - 1;
+        received_bytes += msgs
+            .into_iter()
+            .skip(1)
+            .fold(0, |acc, msg| acc + msg.data.len());
+
         let t0: Instant = Instant::now();
 
         info!("Worker {} - started receiving", id);
-        for _ in 0..repeat {
+        for _ in 0..repeat - 1 {
             let msgs = burst_middleware
                 .gather(data.clone())
                 .await
