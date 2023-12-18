@@ -14,6 +14,7 @@ use std::fs::OpenOptions;
 struct Record {
     benchmark: String,
     backend: String,
+    burst_id: String,
     burst_size: u32,
     groups: u32,
     granularity: u32,
@@ -100,6 +101,7 @@ async fn main() {
         let record = Record {
             benchmark: format!("{}", args.benchmark),
             backend: format!("{}", args.backend),
+            burst_id: args.burst_id.clone(),
             burst_size: args.burst_size,
             groups: args.groups,
             granularity: args.burst_size / args.groups,
