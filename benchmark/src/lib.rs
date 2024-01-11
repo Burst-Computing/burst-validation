@@ -10,7 +10,8 @@ use std::{
 
 use burst_communication_middleware::{
     BurstMessageRelayImpl, BurstMessageRelayOptions, BurstMiddleware, BurstOptions, RabbitMQMImpl,
-    RabbitMQOptions, RedisImpl, RedisOptions, TokioChannelImpl, TokioChannelOptions,
+    RabbitMQOptions, RedisListImpl, RedisListOptions, RedisStreamImpl, RedisStreamOptions,
+    TokioChannelImpl, TokioChannelOptions,
 };
 use clap::{Parser, Subcommand, ValueEnum};
 use log::{error, info};
@@ -98,8 +99,10 @@ pub enum Backend {
         #[arg(long = "session-token", required = false)]
         session_token: Option<String>,
     },
-    /// Use Redis as backend
-    Redis,
+    /// Use Redis Streams as backend
+    RedisStream,
+    /// Use Redis Lists as backend
+    RedisList,
     /// Use RabbitMQ as backend
     Rabbitmq,
     /// Use burst message relay as backend
@@ -118,8 +121,11 @@ impl Display for Backend {
             } => {
                 write!(f, "S3")?;
             }
-            Backend::Redis => {
-                write!(f, "Redis")?;
+            Backend::RedisStream => {
+                write!(f, "RedisStream")?;
+            }
+            Backend::RedisList => {
+                write!(f, "RedisList")?;
             }
             Backend::Rabbitmq => {
                 write!(f, "RabbitMQ")?;
@@ -254,12 +260,24 @@ pub async fn create_proxies(args: &Arguments) -> HashMap<u32, BurstMiddleware> {
             >(burst_options, channel_options, options)
             .await;
         }
-        Backend::Redis => {
-            let mut options = RedisOptions::default();
+        Backend::RedisStream => {
+            let mut options = RedisStreamOptions::default();
             if let Some(server) = &args.server {
                 options.redis_uri(server.to_string());
             }
-            proxies = BurstMiddleware::create_proxies::<TokioChannelImpl, RedisImpl, _, _>(
+            proxies = BurstMiddleware::create_proxies::<TokioChannelImpl, RedisStreamImpl, _, _>(
+                burst_options,
+                channel_options,
+                options,
+            )
+            .await;
+        }
+        Backend::RedisList => {
+            let mut options = RedisListOptions::default();
+            if let Some(server) = &args.server {
+                options.redis_uri(server.to_string());
+            }
+            proxies = BurstMiddleware::create_proxies::<TokioChannelImpl, RedisListImpl, _, _>(
                 burst_options,
                 channel_options,
                 options,
