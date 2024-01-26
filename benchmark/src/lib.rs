@@ -63,6 +63,14 @@ pub struct Arguments {
     #[arg(long = "repeat", required = false, default_value = "256")] // 256MB
     pub repeat: u32,
 
+    // Enable chunking
+    #[arg(long = "chunking", required = false, default_value = "false")]
+    pub chunking: bool,
+
+    // Chunk size
+    #[arg(long = "chunk-size", required = false, default_value = "1048576")] // 1MB
+    pub chunk_size: usize,
+
     /// Tokio broadcast channel size
     #[arg(
         long = "tokio-broadcast-channel-size",
@@ -221,6 +229,8 @@ pub async fn create_proxies(args: &Arguments) -> HashMap<u32, BurstMiddleware> {
         args.burst_size,
         group_ranges,
         args.group_id.to_string(),
+        args.chunking,
+        args.chunk_size,
     );
 
     let channel_options = TokioChannelOptions::new()

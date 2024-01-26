@@ -1,3 +1,4 @@
 [submodule "burst-communication-middleware"]
   path = burst-communication-middleware
   url = git@github.com:CLOUDLAB-URV/burst-communication-middleware.git
+  branch = main

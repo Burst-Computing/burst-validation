@@ -20,7 +20,8 @@ Usage: benchmark [OPTIONS] --benchmark <BENCHMARK> --burst-size <BURST_SIZE> --g
 
 Commands:
   s3             Use S3 as backend
-  redis          Use Redis as backend
+  redis-stream   Use Redis Stream as backend
+  redis-list     Use Redis List as backend
   rabbitmq       Use RabbitMQ as backend
   message-relay  Use burst message relay as backend
   help           Print this message or the help of the given subcommand(s)
