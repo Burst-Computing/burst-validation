@@ -1,12 +1,12 @@
-use burst_communication_middleware::BurstMiddleware;
+use burst_communication_middleware::MiddlewareActorHandle;
 use bytes::Bytes;
 use log::info;
 use std::time::Instant;
 
 use crate::{get_timestamp, Out};
 
-pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> Out {
-    let id = burst_middleware.info().worker_id;
+pub fn worker(burst_middleware: MiddlewareActorHandle, payload: usize, repeat: u32) -> Out {
+    let id = burst_middleware.info.worker_id;
     info!("worker start: id={}", id);
 
     let data = Bytes::from(vec![b'x'; payload]);
@@ -20,11 +20,7 @@ pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u
         let mut received_bytes = 0;
         let mut received_messages = 0;
 
-        let msgs = burst_middleware
-            .gather(data.clone())
-            .await
-            .unwrap()
-            .unwrap();
+        let msgs = burst_middleware.gather(data.clone()).unwrap().unwrap();
         received_messages += msgs.len() - 1;
         received_bytes += msgs
             .into_iter()
@@ -35,11 +31,7 @@ pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u
 
         info!("Worker {} - started receiving", id);
         for _ in 0..repeat - 1 {
-            let msgs = burst_middleware
-                .gather(data.clone())
-                .await
-                .unwrap()
-                .unwrap();
+            let msgs = burst_middleware.gather(data.clone()).unwrap().unwrap();
             // skip the first message (self message)
             received_messages += msgs.len() - 1;
             received_bytes += msgs
@@ -67,7 +59,7 @@ pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u
 
         info!("Thread {} started sending", id);
         for _ in 0..repeat {
-            burst_middleware.gather(data.clone()).await.unwrap();
+            burst_middleware.gather(data.clone()).unwrap();
         }
 
         let t = t0.elapsed();

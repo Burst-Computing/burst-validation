@@ -1,8 +1,8 @@
-use std::{fs, path::Path, time::SystemTime};
+use std::{collections::HashMap, fs, path::Path, thread, time::SystemTime};
 
 use benchmark::{
-    all_to_all, broadcast, create_proxies, create_threads, gather, pair, scatter, setup_logging,
-    Arguments, Benchmark, Out,
+    all_to_all, broadcast, create_proxies, gather, pair, scatter, setup_logging, Arguments,
+    Benchmark, Out,
 };
 use clap::Parser;
 use csv::Writer;
@@ -28,9 +28,13 @@ struct Record {
     end: f64,
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let args = Arguments::parse();
+
+    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
 
     let datetime = format!("{}", chrono::Local::now().format("%Y-%m-%d-%H-%M-%S"));
     let log = Path::new("results")
@@ -57,20 +61,32 @@ async fn main() {
         );
     }
 
-    let proxies = create_proxies(&args).await;
+    let proxies = create_proxies(&args, &tokio_runtime);
 
     let t = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap();
     info!("start: {}", t.as_millis() as f64 / 1000.0);
 
-    let threads = match &args.benchmark {
-        Benchmark::Pair => create_threads(&args, proxies, pair::worker),
-        Benchmark::Broadcast => create_threads(&args, proxies, broadcast::worker),
-        Benchmark::AllToAll => create_threads(&args, proxies, all_to_all::worker),
-        Benchmark::Gather => create_threads(&args, proxies, gather::worker),
-        Benchmark::Scatter => create_threads(&args, proxies, scatter::worker),
-    };
+    let mut threads = HashMap::with_capacity(proxies.len());
+    for (worker_id, proxy) in proxies {
+        let payload_size = args.payload_size;
+        let repeat = args.repeat;
+        let benchmark = args.benchmark.clone();
+        let thread = thread::spawn(move || {
+            info!("thread start: id={}", worker_id);
+            let result = match benchmark {
+                Benchmark::Pair => pair::worker(proxy, payload_size, repeat),
+                Benchmark::Broadcast => broadcast::worker(proxy, payload_size, repeat),
+                Benchmark::AllToAll => todo!(),
+                Benchmark::Gather => gather::worker(proxy, payload_size, repeat),
+                Benchmark::Scatter => scatter::worker(proxy, payload_size, repeat),
+            };
+            info!("thread end: id={}", worker_id);
+            return result;
+        });
+        threads.insert(worker_id, thread);
+    }
 
     // append to csv in results directory (create if doesn't exist)
     let csv = Path::new("results")

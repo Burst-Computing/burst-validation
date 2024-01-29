@@ -1,12 +1,12 @@
-use burst_communication_middleware::BurstMiddleware;
+use burst_communication_middleware::{BurstMiddleware, MiddlewareActorHandle};
 use bytes::Bytes;
 use log::info;
 use std::time::Instant;
 
 use crate::{get_timestamp, Out};
 
-pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u32) -> Out {
-    let id = burst_middleware.info().worker_id;
+pub fn worker(burst_middleware: MiddlewareActorHandle, payload: usize, repeat: u32) -> Out {
+    let id = burst_middleware.info.worker_id;
     info!("worker start: id={}", id);
 
     let latency;
@@ -15,7 +15,7 @@ pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u
 
     // If id 0, sender
     if id == 0 {
-        let data = (0..burst_middleware.info().burst_size - 1)
+        let data = (0..burst_middleware.info.burst_size - 1)
             .map(|_| Bytes::from(vec![b'x'; payload]))
             .collect::<Vec<Bytes>>();
 
@@ -23,7 +23,7 @@ pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u
 
         info!("Worker {} - started sending", id);
         for _ in 0..repeat {
-            burst_middleware.scatter(Some(data.clone())).await.unwrap();
+            burst_middleware.scatter(Some(data.clone())).unwrap();
         }
 
         let t = t0.elapsed();
@@ -34,7 +34,7 @@ pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u
             "Worker {} - sent {} MB ({} messages) in {} s (latency: {} s, throughput {} MB/s)",
             id,
             size_mb,
-            repeat * (burst_middleware.info().burst_size - 1),
+            repeat * (burst_middleware.info.burst_size - 1),
             t.as_millis() as f64 / 1000.0,
             latency,
             throughput
@@ -43,14 +43,14 @@ pub async fn worker(burst_middleware: BurstMiddleware, payload: usize, repeat: u
     } else {
         let mut received_bytes = 0;
 
-        let msgs = burst_middleware.scatter(None).await.unwrap().unwrap();
+        let msgs = burst_middleware.scatter(None).unwrap().unwrap();
         received_bytes += msgs.data.len();
 
         let t0: Instant = Instant::now();
 
         info!("Worker {} - started receiving", id);
         for _ in 0..repeat - 1 {
-            let msgs = burst_middleware.scatter(None).await.unwrap().unwrap();
+            let msgs = burst_middleware.scatter(None).unwrap().unwrap();
             received_bytes += msgs.data.len();
         }
 
