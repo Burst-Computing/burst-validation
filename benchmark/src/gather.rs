@@ -1,11 +1,11 @@
-use burst_communication_middleware::BurstMiddleware;
+use burst_communication_middleware::MiddlewareActorHandle;
 use bytes::Bytes;
 use log::info;
 
 use crate::{get_timestamp, Out};
 
-pub async fn worker(burst_middleware: BurstMiddleware, payload: usize) -> Out {
-    let id = burst_middleware.info().worker_id;
+pub fn worker(burst_middleware: MiddlewareActorHandle, payload: usize) -> Out {
+    let id = burst_middleware.info.worker_id;
     info!("worker start: id={}", id);
     let start = get_timestamp();
 
@@ -15,11 +15,7 @@ pub async fn worker(burst_middleware: BurstMiddleware, payload: usize) -> Out {
     // If id 0, receiver
     if id == 0 {
         info!("Worker {} - started receiving", id);
-        let msgs = burst_middleware
-            .gather(data.clone())
-            .await
-            .unwrap()
-            .unwrap();
+        let msgs = burst_middleware.gather(data.clone()).unwrap().unwrap();
 
         let received_messages = msgs.len();
         info!("Worker {} - received {} messages", id, received_messages);
@@ -27,7 +23,7 @@ pub async fn worker(burst_middleware: BurstMiddleware, payload: usize) -> Out {
     // If id != 0, sender
     } else {
         info!("Worker {} - started sending", id);
-        burst_middleware.gather(data.clone()).await.unwrap();
+        burst_middleware.gather(data.clone()).unwrap();
         total_size = data.len();
     }
 

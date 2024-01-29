@@ -2,24 +2,21 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::{Display, Formatter},
     fs::OpenOptions,
-    future::Future,
     path::Path,
-    thread::{self, JoinHandle},
     time::SystemTime,
 };
 
 use burst_communication_middleware::{
-    BurstMessageRelayImpl, BurstMessageRelayOptions, BurstMiddleware, BurstOptions, RabbitMQMImpl,
-    RabbitMQOptions, RedisListImpl, RedisListOptions, RedisStreamImpl, RedisStreamOptions,
-    TokioChannelImpl, TokioChannelOptions,
+    BurstMessageRelayImpl, BurstMessageRelayOptions, BurstMiddleware, BurstOptions,
+    MiddlewareActorHandle, RabbitMQMImpl, RabbitMQOptions, RedisListImpl, RedisListOptions,
+    RedisStreamImpl, RedisStreamOptions, TokioChannelImpl, TokioChannelOptions,
 };
 use clap::{Parser, Subcommand, ValueEnum};
-use log::{error, info};
+use log::error;
 use tracing_subscriber::{
     fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
 
-pub mod all_to_all;
 pub mod broadcast;
 pub mod gather;
 pub mod pair;
@@ -141,7 +138,7 @@ impl Display for Backend {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, ValueEnum)]
+#[derive(Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Benchmark {
     /// Run pair benchmark
     Pair,
@@ -178,35 +175,10 @@ impl Display for Benchmark {
     }
 }
 
-pub fn create_threads<F, Fut, O>(
+pub fn create_proxies(
     args: &Arguments,
-    proxies: HashMap<u32, BurstMiddleware>,
-    f: F,
-) -> HashMap<u32, JoinHandle<O>>
-where
-    F: FnOnce(BurstMiddleware, usize) -> Fut + Copy + Send + 'static,
-    Fut: Future<Output = O> + Send + 'static,
-    O: Send + 'static,
-{
-    let mut threads = HashMap::with_capacity(proxies.len());
-    for (worker_id, proxy) in proxies {
-        let payload_size = args.payload_size;
-        let thread = thread::spawn(move || {
-            info!("thread start: id={}", worker_id);
-            let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .unwrap();
-            let result = tokio_runtime.block_on(f(proxy, payload_size));
-            info!("thread end: id={}", worker_id);
-            result
-        });
-        threads.insert(worker_id, thread);
-    }
-    threads
-}
-
-pub async fn create_proxies(args: &Arguments) -> HashMap<u32, BurstMiddleware> {
+    tokio_runtime: &tokio::runtime::Runtime,
+) -> HashMap<u32, MiddlewareActorHandle> {
     let group_size = args.burst_size / args.groups;
 
     let group_ranges = (0..args.groups)
@@ -231,102 +203,112 @@ pub async fn create_proxies(args: &Arguments) -> HashMap<u32, BurstMiddleware> {
         .broadcast_channel_size(args.tokio_broadcast_channel_size)
         .build();
 
-    let proxies;
-    match &args.backend {
-        Backend::S3 {
-            bucket,
-            region,
-            access_key_id,
-            secret_access_key,
-            session_token,
-        } => {
-            let mut options = burst_communication_middleware::S3Options::default();
-            if let Some(bucket) = bucket {
-                options.bucket(bucket.to_string());
-            }
-            if let Some(region) = region {
-                options.region(region.to_string());
-            }
-            if let Some(access_key_id) = access_key_id {
-                options.access_key_id(access_key_id.to_string());
-            }
-            if let Some(secret_access_key) = secret_access_key {
-                options.secret_access_key(secret_access_key.to_string());
-            }
-            options.session_token(session_token.clone());
-            options.endpoint(args.server.clone());
+    let proxies = tokio_runtime.block_on(async move {
+        let proxies;
+        match &args.backend {
+            Backend::S3 {
+                bucket,
+                region,
+                access_key_id,
+                secret_access_key,
+                session_token,
+            } => {
+                let mut options = burst_communication_middleware::S3Options::default();
+                if let Some(bucket) = bucket {
+                    options.bucket(bucket.to_string());
+                }
+                if let Some(region) = region {
+                    options.region(region.to_string());
+                }
+                if let Some(access_key_id) = access_key_id {
+                    options.access_key_id(access_key_id.to_string());
+                }
+                if let Some(secret_access_key) = secret_access_key {
+                    options.secret_access_key(secret_access_key.to_string());
+                }
+                options.session_token(session_token.clone());
+                options.endpoint(args.server.clone());
 
-            proxies = BurstMiddleware::create_proxies::<
-                TokioChannelImpl,
-                burst_communication_middleware::S3Impl,
-                _,
-                _,
-            >(burst_options, channel_options, options)
-            .await;
-        }
-        Backend::RedisStream => {
-            let mut options = RedisStreamOptions::default();
-            if let Some(server) = &args.server {
-                options.redis_uri(server.to_string());
+                proxies = BurstMiddleware::create_proxies::<
+                    TokioChannelImpl,
+                    burst_communication_middleware::S3Impl,
+                    _,
+                    _,
+                >(burst_options, channel_options, options)
+                .await;
             }
-            proxies = BurstMiddleware::create_proxies::<TokioChannelImpl, RedisStreamImpl, _, _>(
-                burst_options,
-                channel_options,
-                options,
-            )
-            .await;
-        }
-        Backend::RedisList => {
-            let mut options = RedisListOptions::default();
-            if let Some(server) = &args.server {
-                options.redis_uri(server.to_string());
+            Backend::RedisStream => {
+                let mut options = RedisStreamOptions::default();
+                if let Some(server) = &args.server {
+                    options.redis_uri(server.to_string());
+                }
+                proxies =
+                    BurstMiddleware::create_proxies::<TokioChannelImpl, RedisStreamImpl, _, _>(
+                        burst_options,
+                        channel_options,
+                        options,
+                    )
+                    .await;
             }
-            proxies = BurstMiddleware::create_proxies::<TokioChannelImpl, RedisListImpl, _, _>(
-                burst_options,
-                channel_options,
-                options,
-            )
-            .await;
-        }
-        Backend::Rabbitmq => {
-            let mut options = RabbitMQOptions::default()
-                .durable_queues(true)
-                .ack(true)
-                .build();
-            if let Some(server) = &args.server {
-                options.rabbitmq_uri(server.to_string());
+            Backend::RedisList => {
+                let mut options = RedisListOptions::default();
+                if let Some(server) = &args.server {
+                    options.redis_uri(server.to_string());
+                }
+                proxies = BurstMiddleware::create_proxies::<TokioChannelImpl, RedisListImpl, _, _>(
+                    burst_options,
+                    channel_options,
+                    options,
+                )
+                .await;
             }
-            proxies = BurstMiddleware::create_proxies::<TokioChannelImpl, RabbitMQMImpl, _, _>(
-                burst_options,
-                channel_options,
-                options,
-            )
-            .await;
-        }
-        Backend::MessageRelay => {
-            let mut options = BurstMessageRelayOptions::default();
-            if let Some(server) = &args.server {
-                options.server_uri(server.to_string());
+            Backend::Rabbitmq => {
+                let mut options = RabbitMQOptions::default()
+                    .durable_queues(true)
+                    .ack(true)
+                    .build();
+                if let Some(server) = &args.server {
+                    options.rabbitmq_uri(server.to_string());
+                }
+                proxies = BurstMiddleware::create_proxies::<TokioChannelImpl, RabbitMQMImpl, _, _>(
+                    burst_options,
+                    channel_options,
+                    options,
+                )
+                .await;
             }
-            proxies = BurstMiddleware::create_proxies::<
-                TokioChannelImpl,
-                BurstMessageRelayImpl,
-                _,
-                _,
-            >(burst_options, channel_options, options)
-            .await;
+            Backend::MessageRelay => {
+                let mut options = BurstMessageRelayOptions::default();
+                if let Some(server) = &args.server {
+                    options.server_uri(server.to_string());
+                }
+                proxies = BurstMiddleware::create_proxies::<
+                    TokioChannelImpl,
+                    BurstMessageRelayImpl,
+                    _,
+                    _,
+                >(burst_options, channel_options, options)
+                .await;
+            }
         }
-    }
+        return proxies;
+    });
 
-    let proxies = match proxies {
-        Ok(p) => p,
+    let actors = match proxies {
+        Ok(p) => p
+            .into_iter()
+            .map(|(id, proxy)| {
+                let actor = MiddlewareActorHandle::new(proxy, tokio_runtime);
+                (id, actor)
+            })
+            .collect::<HashMap<u32, MiddlewareActorHandle>>(),
         Err(e) => {
             error!("{:?}", e);
             panic!("Failed to create proxies");
         }
     };
 
-    proxies
+    actors
 }
 
 pub fn setup_logging(log: impl AsRef<Path>) {

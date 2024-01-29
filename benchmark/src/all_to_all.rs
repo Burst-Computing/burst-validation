@@ -1,22 +1,22 @@
-use burst_communication_middleware::BurstMiddleware;
+use burst_communication_middleware::{BurstMiddleware, MiddlewareActorHandle};
 use bytes::Bytes;
 use log::info;
 
 use crate::{get_timestamp, Out};
 
-pub async fn worker(burst_middleware: BurstMiddleware, payload: usize) -> Out {
-    let id = burst_middleware.info().worker_id;
+pub fn worker(burst_middleware: MiddlewareActorHandle, payload: usize) -> Out {
+    let id = burst_middleware.info.worker_id;
     info!("worker start: id={}", id);
     let start = get_timestamp();
 
     let data = Bytes::from(vec![b'x'; payload]);
-    let data = (0..burst_middleware.info().burst_size - 1)
+    let data = (0..burst_middleware.info.burst_size - 1)
         .map(|_| data.clone())
         .collect::<Vec<Bytes>>();
 
     info!("Worker {} - started sending & receiving", id);
 
-    let msgs = burst_middleware.all_to_all(data.clone()).await.unwrap();
+    let msgs = burst_middleware.all_to_all(data.clone()).unwrap();
 
     let received_messages = msgs.len();
     info!("Worker {} - received {} messages", id, received_messages);
