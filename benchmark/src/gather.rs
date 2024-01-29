@@ -1,89 +1,52 @@
 use burst_communication_middleware::MiddlewareActorHandle;
 use bytes::Bytes;
 use log::info;
-use std::time::Instant;
 
 use crate::{get_timestamp, Out};
 
-pub fn worker(burst_middleware: MiddlewareActorHandle, payload: usize, repeat: u32) -> Out {
+pub fn worker(burst_middleware: MiddlewareActorHandle, payload: usize) -> Out {
     let id = burst_middleware.info.worker_id;
     info!("worker start: id={}", id);
-
-    let data = Bytes::from(vec![b'x'; payload]);
-
-    let latency;
-    let throughput;
     let start = get_timestamp();
+
+    let total_size;
+    let data = Bytes::from(vec![b'x'; payload]);
 
     // If id 0, receiver
     if id == 0 {
-        let mut received_bytes = 0;
-        let mut received_messages = 0;
-
-        let msgs = burst_middleware.gather(data.clone()).unwrap().unwrap();
-        received_messages += msgs.len() - 1;
-        received_bytes += msgs
-            .into_iter()
-            .skip(1)
-            .fold(0, |acc, msg| acc + msg.data.len());
-
-        let t0: Instant = Instant::now();
-
         info!("Worker {} - started receiving", id);
-        for _ in 0..repeat - 1 {
-            let msgs = burst_middleware.gather(data.clone()).unwrap().unwrap();
-            // skip the first message (self message)
-            received_messages += msgs.len() - 1;
-            received_bytes += msgs
-                .into_iter()
-                .skip(1)
-                .fold(0, |acc, msg| acc + msg.data.len());
-        }
+        let msgs = burst_middleware.gather(data.clone()).unwrap().unwrap();
 
-        let t = t0.elapsed();
-        let size_mb = received_bytes as f64 / 1024.0 / 1024.0;
-        latency = t.as_millis() as f64 / repeat as f64 / 1000.0;
-        throughput = size_mb as f64 / (t.as_millis() as f64 / 1000.0);
-        info!(
-            "Worker {} - received {} MB ({} messages) in {} s (latency: {} s, throughput {} MB/s)",
-            id,
-            size_mb,
-            received_messages,
-            t.as_millis() as f64 / 1000.0,
-            latency,
-            throughput
-        );
+        let received_messages = msgs.len();
+        info!("Worker {} - received {} messages", id, received_messages);
+        total_size = msgs.into_iter().fold(0, |acc, msg| acc + msg.data.len());
     // If id != 0, sender
     } else {
-        let t0: Instant = Instant::now();
-
-        info!("Thread {} started sending", id);
-        for _ in 0..repeat {
-            burst_middleware.gather(data.clone()).unwrap();
-        }
-
-        let t = t0.elapsed();
-        let total_size = data.len() * repeat as usize;
-        let size_mb = total_size as f64 / 1024.0 / 1024.0;
-        latency = t.as_millis() as f64 / repeat as f64 / 1000.0;
-        throughput = size_mb as f64 / (t.as_millis() as f64 / 1000.0);
-        info!(
-            "Worker {} - sent {} MB ({} messages) in {} s (latency: {} s, throughput {} MB/s)",
-            id,
-            size_mb,
-            repeat,
-            t.as_millis() as f64 / 1000.0,
-            latency,
-            throughput
-        );
+        info!("Worker {} - started sending", id);
+        burst_middleware.gather(data.clone()).unwrap();
+        total_size = data.len();
     }
 
     info!("worker {} end", id);
-
     let end = get_timestamp();
 
+    let elapsed = end - start;
+    let size_mb = total_size as f64 / 1024.0 / 1024.0;
+    let throughput = size_mb as f64 / elapsed as f64;
+
+    if id == 0 {
+        info!(
+            "Worker {} - received {} MB in {} s (throughput {} MB/s)",
+            id, size_mb, elapsed, throughput
+        );
+    } else {
+        info!(
+            "Worker {} - sent {} MB in {} s (throughput {} MB/s)",
+            id, size_mb, elapsed, throughput
+        );
+    }
+
     Out {
-        latency,
         throughput,
         start,
         end,

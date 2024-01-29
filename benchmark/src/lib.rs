@@ -2,9 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::{Display, Formatter},
     fs::OpenOptions,
-    future::Future,
     path::Path,
-    thread::{self, JoinHandle},
     time::SystemTime,
 };
 
@@ -14,12 +12,11 @@ use burst_communication_middleware::{
     RedisStreamImpl, RedisStreamOptions, TokioChannelImpl, TokioChannelOptions,
 };
 use clap::{Parser, Subcommand, ValueEnum};
-use log::{error, info};
+use log::error;
 use tracing_subscriber::{
     fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
 
-pub mod all_to_all;
 pub mod broadcast;
 pub mod gather;
 pub mod pair;
@@ -59,15 +56,11 @@ pub struct Arguments {
     #[arg(long = "payload-size", required = false, default_value = "1048576")] // 1MB
     pub payload_size: usize,
 
-    /// Repeat count
-    #[arg(long = "repeat", required = false, default_value = "256")] // 256MB
-    pub repeat: u32,
-
-    // Enable chunking
+    /// Enable chunking
     #[arg(long = "chunking", required = false, default_value = "false")]
     pub chunking: bool,
 
-    // Chunk size
+    /// Chunk size
     #[arg(long = "chunk-size", required = false, default_value = "1048576")] // 1MB
     pub chunk_size: usize,
 
@@ -81,7 +74,6 @@ pub struct Arguments {
 }
 
 pub struct Out {
-    pub latency: f64,
     pub throughput: f64,
     pub start: f64,
     pub end: f64,

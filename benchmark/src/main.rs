@@ -1,8 +1,7 @@
 use std::{collections::HashMap, fs, path::Path, thread, time::SystemTime};
 
 use benchmark::{
-    all_to_all, broadcast, create_proxies, gather, pair, scatter, setup_logging, Arguments,
-    Benchmark, Out,
+    broadcast, create_proxies, gather, pair, scatter, setup_logging, Arguments, Benchmark, Out,
 };
 use clap::Parser;
 use csv::Writer;
@@ -18,11 +17,11 @@ struct Record {
     burst_size: u32,
     groups: u32,
     granularity: u32,
-    repeat: u32,
+    chunking: bool,
+    chunk_size: usize,
     payload_size: usize,
     group_id: String,
     worker_id: u32,
-    latency: f64,
     throughput: f64,
     start: f64,
     end: f64,
@@ -52,7 +51,7 @@ fn main() {
     info!("Running {:?} benchmark", args.benchmark);
 
     if args.benchmark == Benchmark::Pair {
-        let data_per_worker = args.payload_size * args.repeat as usize;
+        let data_per_worker = args.payload_size as usize;
         let total_data = data_per_worker * (args.burst_size / 2) as usize;
         info!(
             "Total data to transmit: {} MB ({} MB per worker)",
@@ -71,16 +70,15 @@ fn main() {
     let mut threads = HashMap::with_capacity(proxies.len());
     for (worker_id, proxy) in proxies {
         let payload_size = args.payload_size;
-        let repeat = args.repeat;
         let benchmark = args.benchmark.clone();
         let thread = thread::spawn(move || {
             info!("thread start: id={}", worker_id);
             let result = match benchmark {
-                Benchmark::Pair => pair::worker(proxy, payload_size, repeat),
-                Benchmark::Broadcast => broadcast::worker(proxy, payload_size, repeat),
+                Benchmark::Pair => pair::worker(proxy, payload_size),
+                Benchmark::Broadcast => broadcast::worker(proxy, payload_size),
                 Benchmark::AllToAll => todo!(),
-                Benchmark::Gather => gather::worker(proxy, payload_size, repeat),
-                Benchmark::Scatter => scatter::worker(proxy, payload_size, repeat),
+                Benchmark::Gather => gather::worker(proxy, payload_size),
+                Benchmark::Scatter => scatter::worker(proxy, payload_size),
             };
             info!("thread end: id={}", worker_id);
             return result;
@@ -101,17 +99,14 @@ fn main() {
             .unwrap(),
     );
 
-    let mut total_latency: f64 = 0.0;
     let mut agg_throughput: f64 = 0.0;
     for (worker_id, thread) in threads {
         let Out {
-            latency,
             throughput,
             start,
             end,
         } = thread.join().unwrap();
 
-        total_latency += latency;
         agg_throughput += throughput;
 
         let record = Record {
@@ -121,11 +116,11 @@ fn main() {
             burst_size: args.burst_size,
             groups: args.groups,
             granularity: args.burst_size / args.groups,
-            repeat: args.repeat,
+            chunking: args.chunking,
+            chunk_size: args.chunk_size,
             payload_size: args.payload_size,
             group_id: args.group_id.clone(),
             worker_id,
-            latency,
             throughput,
             start,
             end,
@@ -135,9 +130,8 @@ fn main() {
     }
 
     info!(
-        "Average latency: {} s, aggregate throughput: {} MB/s",
-        total_latency / args.burst_size as f64,
-        agg_throughput
+        "Aggregated throughput: {} MB/s",
+        agg_throughput / args.groups as f64
     );
 
     let t = SystemTime::now()
