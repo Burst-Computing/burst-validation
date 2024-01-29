@@ -59,10 +59,6 @@ pub struct Arguments {
     #[arg(long = "payload-size", required = false, default_value = "1048576")] // 1MB
     pub payload_size: usize,
 
-    /// Repeat count
-    #[arg(long = "repeat", required = false, default_value = "256")] // 256MB
-    pub repeat: u32,
-
     // Enable chunking
     #[arg(long = "chunking", required = false, default_value = "false")]
     pub chunking: bool,
@@ -81,7 +77,6 @@ pub struct Arguments {
 }
 
 pub struct Out {
-    pub latency: f64,
     pub throughput: f64,
     pub start: f64,
     pub end: f64,
@@ -189,21 +184,20 @@ pub fn create_threads<F, Fut, O>(
     f: F,
 ) -> HashMap<u32, JoinHandle<O>>
 where
-    F: FnOnce(BurstMiddleware, usize, u32) -> Fut + Copy + Send + 'static,
+    F: FnOnce(BurstMiddleware, usize) -> Fut + Copy + Send + 'static,
     Fut: Future<Output = O> + Send + 'static,
     O: Send + 'static,
 {
     let mut threads = HashMap::with_capacity(proxies.len());
     for (worker_id, proxy) in proxies {
         let payload_size = args.payload_size;
-        let repeat = args.repeat;
         let thread = thread::spawn(move || {
             info!("thread start: id={}", worker_id);
             let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .unwrap();
-            let result = tokio_runtime.block_on(f(proxy, payload_size, repeat));
+            let result = tokio_runtime.block_on(f(proxy, payload_size));
             info!("thread end: id={}", worker_id);
             result
         });
