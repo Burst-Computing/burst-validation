@@ -59,11 +59,11 @@ pub struct Arguments {
     #[arg(long = "payload-size", required = false, default_value = "1048576")] // 1MB
     pub payload_size: usize,
 
-    // Enable chunking
+    /// Enable chunking
     #[arg(long = "chunking", required = false, default_value = "false")]
     pub chunking: bool,
 
-    // Chunk size
+    /// Chunk size
     #[arg(long = "chunk-size", required = false, default_value = "1048576")] // 1MB
     pub chunk_size: usize,
 
