@@ -17,6 +17,7 @@ use tracing_subscriber::{
     fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
 
+pub mod all_to_all;
 pub mod broadcast;
 pub mod gather;
 pub mod pair;

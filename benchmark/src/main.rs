@@ -1,7 +1,8 @@
 use std::{collections::HashMap, fs, path::Path, thread, time::SystemTime};
 
 use benchmark::{
-    broadcast, create_proxies, gather, pair, scatter, setup_logging, Arguments, Benchmark, Out,
+    all_to_all, broadcast, create_proxies, gather, pair, scatter, setup_logging, Arguments,
+    Benchmark, Out,
 };
 use clap::Parser;
 use csv::Writer;
@@ -76,7 +77,7 @@ fn main() {
             let result = match benchmark {
                 Benchmark::Pair => pair::worker(proxy, payload_size),
                 Benchmark::Broadcast => broadcast::worker(proxy, payload_size),
-                Benchmark::AllToAll => todo!(),
+                Benchmark::AllToAll => all_to_all::worker(proxy, payload_size),
                 Benchmark::Gather => gather::worker(proxy, payload_size),
                 Benchmark::Scatter => scatter::worker(proxy, payload_size),
             };

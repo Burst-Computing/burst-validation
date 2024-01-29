@@ -1,4 +1,4 @@
-use burst_communication_middleware::{BurstMiddleware, MiddlewareActorHandle};
+use burst_communication_middleware::MiddlewareActorHandle;
 use bytes::Bytes;
 use log::info;
 
