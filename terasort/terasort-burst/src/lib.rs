@@ -8,8 +8,8 @@ use std::{
 };
 
 use burst_communication_middleware::{
-    BurstMiddleware, BurstOptions, RabbitMQMImpl, RabbitMQOptions, TokioChannelImpl,
-    TokioChannelOptions,
+    BurstMiddleware, BurstOptions, MiddlewareActorHandle, RabbitMQMImpl, RabbitMQOptions,
+    TokioChannelImpl, TokioChannelOptions,
 };
 use bytes::Bytes;
 use polars::{
@@ -68,19 +68,7 @@ struct Output {
     etag: String,
 }
 
-async fn sort_burst(args: Input, burst_middleware: BurstMiddleware) -> Output {
-    // using abandoned rusoto lib because aws sdk beta sucks and does not work with minio
-    let client = rusoto_core::request::HttpClient::new().unwrap();
-    let region = Region::Custom {
-        name: args.s3_config.region,
-        endpoint: args.s3_config.endpoint,
-    };
-    let creds = rusoto_core::credential::StaticProvider::new_minimal(
-        args.s3_config.aws_access_key_id,
-        args.s3_config.aws_secret_access_key,
-    );
-    let s3_client = S3Client::new_with(client, creds, region);
-
+async fn get_chunk(s3_client: &S3Client, args: &Input) -> Vec<u8> {
     let chunk_size = (args.obj_size as f64 / args.partitions as f64).ceil() as u32;
 
     let byte_range = (
@@ -93,7 +81,6 @@ async fn sort_burst(args: Input, burst_middleware: BurstMiddleware) -> Output {
     // );
     // println!("Byte range: {:?}", byte_range);
 
-    let get_t0 = Instant::now();
     let get_res = s3_client
         .get_object(GetObjectRequest {
             bucket: args.bucket.clone(),
@@ -111,11 +98,48 @@ async fn sort_burst(args: Input, burst_middleware: BurstMiddleware) -> Output {
             break;
         }
     }
+    return buffer;
+}
+
+async fn upload_chunk_result(s3_client: &S3Client, args: &Input, buf: Vec<u8>) -> String {
+    let mpu_input = rusoto_s3::UploadPartRequest {
+        bucket: args.bucket.clone(),
+        key: args.mpu_key.clone(),
+        part_number: (args.partition_idx + 1) as i64,
+        upload_id: args.mpu_id.clone(),
+        body: Some(buf.into()),
+        ..Default::default()
+    };
+    println!("{:?}", mpu_input);
+    let part_upload_res = s3_client.upload_part(mpu_input).await.unwrap();
+    println!("{:?}", part_upload_res);
+    part_upload_res.e_tag.unwrap()
+}
+
+fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
+    // using abandoned rusoto lib because aws sdk beta sucks and does not work with minio
+    let client = rusoto_core::request::HttpClient::new().unwrap();
+    let region = Region::Custom {
+        name: args.s3_config.region.clone(),
+        endpoint: args.s3_config.endpoint.clone(),
+    };
+    let creds = rusoto_core::credential::StaticProvider::new_minimal(
+        args.s3_config.aws_access_key_id.clone(),
+        args.s3_config.aws_secret_access_key.clone(),
+    );
+    let s3_client = S3Client::new_with(client, creds, region);
+
+    let tokio_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let get_t0 = Instant::now();
+    let chunk = tokio_runtime.block_on(get_chunk(&s3_client, &args));
     let get_duration = get_t0.elapsed();
     println!("Get time: {:?}", get_duration);
-    println!("Buffer size: {}", buffer.len());
+    println!("Buffer size: {}", chunk.len());
 
-    let cursor = Cursor::new(buffer);
+    let cursor = Cursor::new(chunk);
     let df_chunk: DataFrame = CsvReader::new(cursor)
         .infer_schema(Some(1))
         .has_header(false)
@@ -168,17 +192,14 @@ async fn sort_burst(args: Input, burst_middleware: BurstMiddleware) -> Output {
             buf.len()
         );
         let send_t0 = Instant::now();
-        burst_middleware
-            .send(bucket, Bytes::from(buf))
-            .await
-            .unwrap();
+        burst_middleware.send(bucket, Bytes::from(buf)).unwrap();
         let send_duration = send_t0.elapsed();
         println!("Send time: {:?}", send_duration);
     }
 
     let mut agg_df: Option<DataFrame> = None;
     for i in 0..args.partitions {
-        let msg = burst_middleware.recv().await.unwrap();
+        let msg = burst_middleware.recv(i).unwrap();
         println!("Received partition {} from worker {}", i, msg.sender_id);
         let cursor = Cursor::new(msg.data);
 
@@ -234,21 +255,11 @@ async fn sort_burst(args: Input, burst_middleware: BurstMiddleware) -> Output {
     let write_duration = write_start_t.elapsed();
     println!("Serialize time: {:?}", write_duration);
 
-    let mpu_input = rusoto_s3::UploadPartRequest {
-        bucket: args.bucket.clone(),
-        key: args.mpu_key.clone(),
-        part_number: (args.partition_idx + 1) as i64,
-        upload_id: args.mpu_id,
-        body: Some(buf.into()),
-        ..Default::default()
-    };
-    println!("{:?}", mpu_input);
     let put_part_t0 = Instant::now();
-    let part_upload_res = s3_client.upload_part(mpu_input).await.unwrap();
+    let etag = tokio_runtime.block_on(upload_chunk_result(&s3_client, &args, buf));
     let put_part_duration = put_part_t0.elapsed();
     println!("Put part time: {:?}", put_part_duration);
 
-    let etag = part_upload_res.e_tag.unwrap();
     println!("etag: {}", etag);
     Output {
         bucket: args.bucket,
@@ -259,15 +270,11 @@ async fn sort_burst(args: Input, burst_middleware: BurstMiddleware) -> Output {
 }
 
 // ow_main would be the entry point of an actual open whisk burst worker
-pub fn main(args: Value, burst_middleware: BurstMiddleware) -> Result<Value, Error> {
+pub fn main(args: Value, burst_middleware: MiddlewareActorHandle) -> Result<Value, Error> {
     let input: Input = serde_json::from_value(args)?;
     println!("Starting sort: {:?}", input);
 
-    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let result = tokio_runtime.block_on(async { sort_burst(input, burst_middleware).await });
+    let result = sort_burst(input, burst_middleware);
 
     println!("Done");
     println!("{:?}", result);
