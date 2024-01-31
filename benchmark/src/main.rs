@@ -130,10 +130,7 @@ fn main() {
         writer.serialize(record).unwrap();
     }
 
-    info!(
-        "Aggregated throughput: {} MB/s",
-        agg_throughput / args.groups as f64
-    );
+    info!("Aggregated throughput: {} MB/s", agg_throughput);
 
     let t = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
