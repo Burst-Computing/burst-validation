@@ -1,0 +1,36 @@
+[
+  {
+    "bucket": "kmeans",
+    "key": "kmeans200.csv",
+    "filesize": 1400,
+    "partitions": 2,
+    "partition_idx": 0,
+    "threshold": 0.1,
+    "num_dimensions": 2,
+    "num_clusters": 4,
+    "max_iterations": 50,
+    "s3_config": {
+      "region": "us-west-1",
+      "endpoint": "http://172.17.0.1:9000",
+      "aws_access_key_id": "lab144",
+      "aws_secret_access_key": "astl1a4b4"
+    }
+  },
+  {
+    "bucket": "kmeans",
+    "key": "kmeans200.csv",
+    "filesize": 1400,
+    "partitions": 2,
+    "partition_idx": 1,
+    "threshold": 0.1,
+    "num_dimensions": 2,
+    "num_clusters": 4,
+    "max_iterations": 50,
+    "s3_config": {
+      "region": "us-west-1",
+      "endpoint": "http://172.17.0.1:9000",
+      "aws_access_key_id": "lab144",
+      "aws_secret_access_key": "astl1a4b4"
+    }
+  }
+]
