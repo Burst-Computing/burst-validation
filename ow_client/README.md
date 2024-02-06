@@ -34,12 +34,12 @@ Please visit [Runtime Rust README](https://github.com/apache/openwhisk-runtime-r
 2. Execute the next command:
 
 ```bash
- zip -r - * | docker run [docker_image] -debug -compile [function_name] > [output_file]
+ zip -r - * | docker run -i [docker_image] -debug -compile [function_name] > [output_file]
 ```
 Example:
 
 ```bash
- zip -r - * | docker run openwhisk/action-rust-v1.34 -debug -compile main > main.zip
+ zip -r - * | docker run -i openwhisk/action-rust-v1.34 -debug -compile main > main.zip
 ```
 This command will compile your code inside the runtime needed (the logic is inside the runtime: communication middleware if needed, action_loop protocol, etc) and return a .zip file that contains an executable ready to post to Openwhisk.
 

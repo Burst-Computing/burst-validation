@@ -1,7 +1,7 @@
 import argparse
 
 from ow_client.openwhisk_executor import OpenwhiskExecutor
-from ow_apps.terasort_classic.terasort_utils import generate_payload, complete_mpu
+from ow_apps.helpers.terasort_helper import generate_payload, complete_mpu
 
 # PRECONDITION: This use case needs to have stored terasort file in Minio
 
@@ -18,8 +18,13 @@ if __name__ == "__main__":
                               sort_column=0)
 
     executor = OpenwhiskExecutor("172.17.0.1", 3233)
-    dt = executor.burst("terasort-burst", params, memory=4096,
-                        custom_image="manriurv/rust-burst:1.72.1", is_zip=True)
+    dt = executor.burst("terasort-burst",
+                        params,
+                        memory=4096,
+                        custom_image="manriurv/rust-burst:1.72.1",
+                        backend="s3",
+                        chunk_size=64,
+                        is_zip=True)
 
     flattened_results = [item for sublist in dt.get_results() for item in sublist]
     flattened_results.sort(key=lambda x: x['part_number'])

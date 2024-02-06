@@ -27,7 +27,8 @@ class OpenwhiskExecutor:
         if "-debug" in sys.argv:
             utils.DEBUGGING = True
 
-    def burst(self, action_name, params_list, is_zip=False, memory=256, custom_image=None, burst_size=None, join=False) -> ResultDataset:
+    def burst(self, action_name, params_list, is_zip=False, memory=256, custom_image=None, backend="rabbitmq",
+              burst_size=None, chunk_size=1, join=False) -> ResultDataset:
         """
         Function to invoke a burst of actions
         :param action_name: the name of the action to invoke. Action must be located into functions folder.
@@ -36,13 +37,15 @@ class OpenwhiskExecutor:
         :param is_zip: indicates if the action is a zip file or a single .rs file
         :param memory: memory to allocate to the action
         :param custom_image: if not None, the action is executed in a container with the specified image
+        :param backend: the backend to use for the burst. (Rabbitmq, RedisStream...)
         :param burst_size: granularity of the burst. If None, the burst is executed in heterogeneous mode
+        :param chunk_size: in burst comm middleware message exchanges (in MB)
         :param join: if True, the burst is executed in heterogeneous containers that respects the multiplicity of the burst size
         :return: Dataset with the results and some metrics of the executions
         """
         dataset = ResultDataset()
         self.__create_action(action_name, is_zip, memory, custom_image)
-        activation_ids = self.__invoke_burst_actions(action_name, params_list, burst_size, join)
+        activation_ids = self.__invoke_burst_actions(action_name, params_list, burst_size, backend, chunk_size, join)
         for index, activation_id in enumerate(activation_ids):
             dataset.add_invocation(index, activation_id, time.time(), is_burst=True)
         fetch_count = 0
@@ -152,12 +155,14 @@ class OpenwhiskExecutor:
             time.sleep(self.__monitor_interval)
         return dataset
 
-    def __invoke_burst_actions(self, action_name, params_list, burst_size, join) -> List[str]:
+    def __invoke_burst_actions(self, action_name, params_list, burst_size,
+                               backend, chunk_size, join) -> List[str] | None:
         burst_url = f"{self.protocol}://{self.host}:{self.port}/api/v1/namespaces/guest/actions/{action_name}?burst=true"
         if burst_size:
             burst_url += f"&granularity={burst_size}"
         if join:
             burst_url += "&join=true"
+        burst_url += f"&backend={backend}&chunk_size={chunk_size}"
         params_list = {"value": params_list}
         response = self.session.post(burst_url, json=params_list)
 
