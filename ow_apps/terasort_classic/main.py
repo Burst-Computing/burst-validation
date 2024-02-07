@@ -12,7 +12,12 @@ if __name__ == "__main__":
     parser.add_argument("--partitions", type=int, required=True, help="Number of partitions")
     parser.add_argument("--bucket", type=str, required=True, help="Bucket name")
     parser.add_argument("--key", type=str, required=True, help="Object key")
-    args = parser.parse_args()
+
+    try:
+        args = parser.parse_args()
+    except argparse.ArgumentError:
+        parser.print_help()
+        exit(1)
 
     params = generate_payload(endpoint=args.endpoint, partitions=args.partitions, bucket=args.bucket, key=args.key,
                               sort_column=0)

@@ -10,6 +10,13 @@ into the Openwhisk (burst version) platform.
 
 For that, a series of explanations are documented above to clarify the usage of this client.
 
+> ❗ If you are searching for more info about specific apps (terasort & kmeans), please visit the following READMEs:
+>  * [Terasort classic](../ow_apps/terasort_classic/README.md)
+>  * [Terasort burst](../ow_apps/terasort_burst/README.md)
+>  * [Kmeans (only burst)](../ow_apps/kmeans/README.md)
+> 
+> For new implementations, please continue reading this README. 
+
 ## Configure the environment
 Please access to the Python code in this repo and modify to convenience the Openwhisk IP, port, protocol..., in order to ensure that the client will connect correctly with Openwhisk controller.
 
@@ -65,5 +72,4 @@ PYTHONPATH=. python3 ow_apps/<app_folder>/main.py
 ```
 
 > ⚠️ This is a prototype. Please no doubt in modify code at convenience to make it work as expected.
-
 
