@@ -66,7 +66,7 @@ Terasort source code is burdensome. Then, we will follow the approach of precomp
       --backend {rabbitmq,redis,redis_stream,redis_list,s3}
                             Burst communication backend
       --chunk_size CHUNK_SIZE
-                            Chunk size for burst messages
+                            Chunk size for burst messages (in KB)
 
 ```
 

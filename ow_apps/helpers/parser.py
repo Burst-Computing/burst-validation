@@ -18,7 +18,7 @@ def add_burst_to_parser(parser):
     parser.add_argument("--join", type=bool, required=False, help="Join burst workers in same invoker", default=False)
     parser.add_argument("--backend", type=str, required=True, help="Burst communication backend",
                         choices=VALID_BURST_BACKEND_OPTIONS)
-    parser.add_argument("--chunk_size", type=int, required=False, help="Chunk size for burst messages", default=1)
+    parser.add_argument("--chunk_size", type=int, required=False, help="Chunk size for burst messages (in KB)", default=1)
 
 
 def add_openwhisk_to_parser(parser):

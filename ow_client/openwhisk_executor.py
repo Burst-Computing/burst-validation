@@ -39,7 +39,7 @@ class OpenwhiskExecutor:
         :param custom_image: if not None, the action is executed in a container with the specified image
         :param backend: the backend to use for the burst. (Rabbitmq, RedisStream...)
         :param burst_size: granularity of the burst. If None, the burst is executed in heterogeneous mode
-        :param chunk_size: in burst comm middleware message exchanges (in MB)
+        :param chunk_size: in burst comm middleware message exchanges (in KB)
         :param join: if True, the burst is executed in heterogeneous containers that respects the multiplicity of the burst size
         :return: Dataset with the results and some metrics of the executions
         """
