@@ -16,11 +16,11 @@ if __name__ == "__main__":
     params = generate_payload(endpoint=args.endpoint, partitions=args.partitions, bucket=args.bucket, key=args.key,
                               sort_column=0)
 
-    executor = OpenwhiskExecutor("172.17.0.1", 3233)
+    executor = OpenwhiskExecutor(args.ow_host, args.ow_port)
     dt = executor.burst("terasort-burst",
                         params,
-                        memory=4096,
-                        custom_image="manriurv/rust-burst:1.72.1",
+                        memory=args.runtime_memory if args.runtime_memory else 4096,
+                        custom_image=args.custom_image,
                         burst_size=args.granularity,
                         join=args.join,
                         backend=args.backend,

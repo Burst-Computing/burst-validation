@@ -11,16 +11,16 @@ if __name__ == "__main__":
     add_burst_to_parser(parser)
     args = try_or_except(parser)
 
-    executor = OpenwhiskExecutor("172.17.0.1", 3233)
+    executor = OpenwhiskExecutor(args.ow_host, args.ow_port)
     params = json.load(open("ow_apps/kmeans/payload2.json"))
     dt = executor.burst("kmeans-burst",
                         params,
-                        memory=4096,
+                        memory=args.runtime_memory if args.runtime_memory else 4096,
                         burst_size=args.granularity,
                         join=args.join,
                         backend=args.backend,
                         chunk_size=args.chunk_size,
-                        custom_image="manriurv/rust-burst:1.72.1",
+                        custom_image=args.custom_image,
                         is_zip=True)
     dt.plot()
     pprint.pprint(dt.get_results())

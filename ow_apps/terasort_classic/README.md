@@ -61,21 +61,32 @@ Terasort source code is burdensome. Then, we will follow the approach of precomp
 
 ```
     PYTHONPATH=. python3 ow_apps/terasort_classic/main.py --help
-    usage: main.py [-h] --endpoint ENDPOINT --partitions PARTITIONS --bucket BUCKET --key KEY
+    usage: main.py [-h] --ow-host OW_HOST --ow-port OW_PORT
+               [--runtime-memory RUNTIME_MEMORY] [--custom-image CUSTOM_IMAGE]
+               --ts-endpoint TS_ENDPOINT --partitions PARTITIONS --bucket
+               BUCKET --key KEY
     
     options:
       -h, --help            show this help message and exit
-      --endpoint ENDPOINT   Endpoint of the S3 service in which the terasort file is stored
+      --ow-host OW_HOST     Openwhisk host
+      --ow-port OW_PORT     Openwhisk port
+      --runtime-memory RUNTIME_MEMORY
+                            Memory to allocate to the runtime (in MB)
+      --custom-image CUSTOM_IMAGE
+                            Tag of the docker custom image to use
+      --ts-endpoint TS_ENDPOINT
+                            Endpoint of the S3 service in which the terasort file is stored
       --partitions PARTITIONS
                             Number of partitions to sort the file into
       --bucket BUCKET       Terasort bucket name
       --key KEY             Terasort object key
+
 ```
 
 11. Execute the burst terasort application (the following is just an example):
 
 ```bash
-    PYTHONPATH=. python3 ow_apps/terasort_burst/main.py --endpoint http://minio:9000 \
-    --partitions 10 --bucket terasort --key terasort-1g 
+    PYTHONPATH=. python3 ow_apps/terasort_burst/main.py --ow-host "172.17.0.1" --ow-port 3233 \
+    --runtime-memory 4096 --ts-endpoint http://minio:9000 --partitions 10 --bucket terasort --key 10g
 ```
 
