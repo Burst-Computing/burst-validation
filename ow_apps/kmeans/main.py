@@ -12,15 +12,16 @@ if __name__ == "__main__":
     args = try_or_except(parser)
 
     executor = OpenwhiskExecutor(args.ow_host, args.ow_port)
+    # TODO: parametrise data that now is hardcoded in json
     params = json.load(open("ow_apps/kmeans/payload2.json"))
     dt = executor.burst("kmeans-burst",
                         params,
-                        memory=args.runtime_memory if args.runtime_memory else 4096,
+                        memory=1024,
                         burst_size=args.granularity,
                         join=args.join,
                         backend=args.backend,
                         chunk_size=args.chunk_size,
-                        custom_image=args.custom_image,
+                        custom_image="manriurv/rust-burst:1",
                         is_zip=True)
     dt.plot()
     pprint.pprint(dt.get_results())
