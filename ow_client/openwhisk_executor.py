@@ -24,8 +24,7 @@ class OpenwhiskExecutor:
         self.session.verify = False
         warnings.filterwarnings('ignore', category=InsecureRequestWarning)
         self.__monitor_interval = 2  # seconds
-        if "-debug" in sys.argv:
-            utils.DEBUGGING = True
+        utils.DEBUGGING = True
 
     def burst(self, action_name, params_list, is_zip=False, memory=256, custom_image=None, backend="rabbitmq",
               burst_size=None, chunk_size=1, join=False) -> ResultDataset:

@@ -13,7 +13,7 @@ if __name__ == "__main__":
     add_terasort_to_parser(parser)
     args = try_or_except(parser)
 
-    params = generate_payload(endpoint=args.endpoint, partitions=args.partitions, bucket=args.bucket, key=args.key,
+    params = generate_payload(endpoint=args.ts_endpoint, partitions=args.partitions, bucket=args.bucket, key=args.key,
                               sort_column=0)
 
     executor = OpenwhiskExecutor(args.ow_host, args.ow_port)

@@ -45,7 +45,7 @@ Terasort source code is burdensome. Then, we will follow the approach of precomp
                --ts-endpoint TS_ENDPOINT --partitions PARTITIONS --bucket
                BUCKET --key KEY [--granularity GRANULARITY] [--join JOIN]
                --backend {rabbitmq,redis,redis_stream,redis_list,s3}
-               [--chunk_size CHUNK_SIZE]
+               [--chunk-size CHUNK_SIZE]
     options:
       -h, --help            show this help message and exit
       --ow-host OW_HOST     Openwhisk host
@@ -65,7 +65,7 @@ Terasort source code is burdensome. Then, we will follow the approach of precomp
       --join JOIN           Join burst workers in same invoker
       --backend {rabbitmq,redis,redis_stream,redis_list,s3}
                             Burst communication backend
-      --chunk_size CHUNK_SIZE
+      --chunk-size CHUNK_SIZE
                             Chunk size for burst messages (in KB)
 
 ```
@@ -75,6 +75,6 @@ Terasort source code is burdensome. Then, we will follow the approach of precomp
 ```bash
     PYTHONPATH=. python3 ow_apps/terasort_burst/main.py --ow-host "172.17.0.1" --ow-port 3233 \
     --runtime-memory 4096 --ts-endpoint http://minio:9000 --partitions 10 --bucket terasort \
-    --key 10g --granularity 1 --join False --backend rabbitmq --chunk_size 32
+    --key 10g --granularity 1 --join False --backend rabbitmq --chunk-size 32
 ```
 
