@@ -2,17 +2,14 @@ import argparse
 import json
 import pprint
 
+from ow_apps.helpers.parser import add_burst_to_parser, try_or_except, add_openwhisk_to_parser
 from ow_client.openwhisk_executor import OpenwhiskExecutor
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-
-    parser.add_argument("--granularity", type=int, required=False, help="Granularity of burst workers", default=None)
-    parser.add_argument("--join", type=bool, required=False, help="Join burst workers in same invoker", default=False)
-    parser.add_argument("--backend", type=str, required=True, help="Burst communication backend")
-    parser.add_argument("--chunk_size", type=int, required=False, help="Chunk size for burst messages", default=1)
-
-    args = parser.parse_args()
+    add_openwhisk_to_parser(parser)
+    add_burst_to_parser(parser)
+    args = try_or_except(parser)
 
     executor = OpenwhiskExecutor("172.17.0.1", 3233)
     params = json.load(open("ow_apps/kmeans/payload2.json"))

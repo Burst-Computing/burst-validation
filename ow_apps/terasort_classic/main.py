@@ -1,5 +1,6 @@
 import argparse
 
+from ow_apps.helpers.parser import add_openwhisk_to_parser, add_terasort_to_parser, try_or_except
 from ow_client.openwhisk_executor import OpenwhiskExecutor
 from ow_apps.terasort_classic.terasort_utils import generate_payload, complete_mpu
 
@@ -8,16 +9,9 @@ from ow_apps.terasort_classic.terasort_utils import generate_payload, complete_m
 # Ex. usage: python3 main.py --endpoint http://172.17.0.1:9000 --partitions 2 --bucket terasort --key terasort-250m
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--endpoint", type=str, required=True, help="Endpoint of the S3 service")
-    parser.add_argument("--partitions", type=int, required=True, help="Number of partitions")
-    parser.add_argument("--bucket", type=str, required=True, help="Bucket name")
-    parser.add_argument("--key", type=str, required=True, help="Object key")
-
-    try:
-        args = parser.parse_args()
-    except argparse.ArgumentError:
-        parser.print_help()
-        exit(1)
+    add_openwhisk_to_parser(parser)
+    add_terasort_to_parser(parser)
+    args = try_or_except(parser)
 
     params = generate_payload(endpoint=args.endpoint, partitions=args.partitions, bucket=args.bucket, key=args.key,
                               sort_column=0)

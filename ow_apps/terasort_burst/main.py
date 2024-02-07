@@ -1,6 +1,6 @@
 import argparse
 
-from ow_apps.helpers.defs import VALID_BURST_BACKEND_OPTIONS
+from ow_apps.helpers.parser import add_openwhisk_to_parser, add_terasort_to_parser, add_burst_to_parser, try_or_except
 from ow_client.openwhisk_executor import OpenwhiskExecutor
 from ow_apps.helpers.terasort_helper import generate_payload, complete_mpu
 
@@ -8,28 +8,10 @@ from ow_apps.helpers.terasort_helper import generate_payload, complete_mpu
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--endpoint", type=str, required=True,
-                        help="Endpoint of the S3 service in which the terasort file is stored")
-    parser.add_argument("--partitions", type=int, required=True,
-                        help="Number of partitions to sort the file into")
-    parser.add_argument("--bucket", type=str, required=True,
-                        help="Terasort bucket name")
-    parser.add_argument("--key", type=str, required=True,
-                        help="Terasort object key")
-    parser.add_argument("--granularity", type=int, required=False, help="Granularity of burst workers",
-                        default=None)
-    parser.add_argument("--join", type=bool, required=False, help="Join burst workers in same invoker",
-                        default=False)
-    parser.add_argument("--backend", type=str, required=True, help="Burst communication backend",
-                        choices=VALID_BURST_BACKEND_OPTIONS)
-    parser.add_argument("--chunk_size", type=int, required=False, help="Chunk size for burst messages",
-                        default=1)
-
-    try:
-        args = parser.parse_args()
-    except argparse.ArgumentError:
-        parser.print_help()
-        exit(1)
+    add_openwhisk_to_parser(parser)
+    add_terasort_to_parser(parser)
+    add_burst_to_parser(parser)
+    args = try_or_except(parser)
 
     params = generate_payload(endpoint=args.endpoint, partitions=args.partitions, bucket=args.bucket, key=args.key,
                               sort_column=0)
