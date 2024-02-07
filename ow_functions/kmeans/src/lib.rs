@@ -1,5 +1,6 @@
+use aws_sdk_s3::Client;
 use nalgebra::DMatrix;
-use std::io::BufRead;
+use std::io::{BufRead, Cursor};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -8,7 +9,7 @@ use burst_communication_middleware::{
     TokioChannelImpl, TokioChannelOptions,
 };
 
-use bytes::Bytes;
+use bytes::{buf, Bytes};
 use std::io::BufReader;
 
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -17,9 +18,6 @@ use aws_config::meta::region::RegionProviderChain;
 use aws_config::BehaviorVersion;
 use aws_config::Region;
 use aws_credential_types::Credentials;
-
-use s3reader::S3ObjectUri;
-use s3reader::S3Reader;
 
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{Error, Value};
@@ -30,27 +28,28 @@ use log::{error, info};
 use std::collections::{HashMap, HashSet};
 use std::thread;
 
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Input {
-    pub bucket: String,
-    pub key: String,
-    pub s3_config: S3Config,
-    pub threshold: f32,
-    pub num_dimensions: u32,
-    pub num_clusters: u32,
-    pub max_iterations: u32,
+ struct Input {
+     bucket: String,
+     key: String,
+     s3_config: S3Config,
+     threshold: f32,
+     num_dimensions: u32,
+     num_clusters: u32,
+     max_iterations: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct S3Config {
-    pub region: String,
-    pub aws_access_key_id: String,
-    pub aws_secret_access_key: String,
-    pub aws_session_token: String,
+ struct S3Config {
+     region: String,
+     aws_access_key_id: String,
+     aws_secret_access_key: String,
+     aws_session_token: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Output {
+ struct Output {
     worker_id: u32,
     correct_centroids: Vec<f32>,
     communication_time: Duration,
@@ -59,8 +58,6 @@ pub struct Output {
 }
 
 async fn get_matrix_from_s3(args: &Input) -> Result<DMatrix<f32>, Box<dyn stdError>> {
-    let s3_uri = "s3://".to_owned() + &args.bucket + "/" + &args.key;
-    println!("S3 Uri: {:?}", s3_uri);
 
     let credentials_provider = Credentials::from_keys(
         args.s3_config.aws_access_key_id.clone(),
@@ -77,10 +74,15 @@ async fn get_matrix_from_s3(args: &Input) -> Result<DMatrix<f32>, Box<dyn stdErr
         .load()
         .await;
 
-    let uri = S3ObjectUri::new(&s3_uri).unwrap();
-    let s3obj = S3Reader::from_config(&config, uri);
+    let client = Client::new(&config);
 
-    Ok(read_csv(&mut BufReader::new(s3obj)).unwrap())
+    let object = client.get_object().bucket(&args.bucket).key(&args.key).send().await.unwrap();
+
+    let buffer = object.body.collect().await.map(|data| data.into_bytes()).unwrap();
+
+    let cursor = Cursor::new(buffer);
+
+    Ok(read_csv(&mut BufReader::new(cursor)).unwrap())
 }
 
 fn read_csv(input: &mut dyn BufRead) -> Result<DMatrix<f32>, Box<dyn stdError>> {
@@ -192,14 +194,13 @@ fn get_timer() -> Duration {
         .expect("Time went backwards")
 }
 
-pub fn kmeans_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
+ fn kmeans_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Option<Output> {
+    
     let start_total = get_timer();
 
-    let data_points = 200;
+    let mut communication: Duration = Default::default();
 
     let mut rng = StdRng::seed_from_u64(33);
-
-    let mut communication: Duration = Default::default();
 
     // START GLOBAL_CENTROIDS
     println!(
@@ -222,12 +223,6 @@ pub fn kmeans_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Out
         }
     }
 
-    let partition_points = data_points;
-    let start_partition = 0;
-
-    println!("Start: {:?}", start_partition);
-    println!("Partition: {:?}", partition_points);
-
     //Load CSV
     let tokio_runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -238,6 +233,12 @@ pub fn kmeans_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Out
 
     let data = task.unwrap();
 
+    let start_partition = 0;
+    let partition_points = data.nrows();
+
+    println!("Start: {:?}", start_partition);
+    println!("Partition: {:?}", partition_points);
+    
     let mut local_partition = data
         .rows(
             start_partition.try_into().unwrap(),
@@ -256,6 +257,7 @@ pub fn kmeans_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Out
 
     let mut iter_count = 0;
     let mut global_delta_val = 10.0;
+
     //while iter_count < max_iterations && global_delta_val > threshold {
     while iter_count < args.max_iterations {
         // Get Centroids
@@ -578,19 +580,24 @@ pub fn kmeans_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Out
 
     let end_total = get_timer();
 
-    let total_time = end_total - start_total;
+    let total_time = end_total - start_total; 
 
-    Output {
-        worker_id: burst_middleware.info.worker_id,
-        correct_centroids: correct_centroids,
-        communication_time: communication,
-        compute_time: total_time - communication,
-        total_time: total_time,
+    if burst_middleware.info.worker_id == 0 {
+        return Some(Output {
+            worker_id: burst_middleware.info.worker_id,
+            correct_centroids: correct_centroids,
+            communication_time: communication,
+            compute_time: total_time - communication,
+            total_time: total_time,
+        })
     }
+
+    None
+    
 }
 
 // ow_main would be the entry point of an actual open whisk burst worker
-/* pub fn main(args: Value, burst_middleware: MiddlewareActorHandle) -> Result<Value, Error> {
+pub fn main(args: Value, burst_middleware: MiddlewareActorHandle) -> Result<Value, Error> {
     let input: Input = serde_json::from_value(args)?;
     println!("Starting kmeans: {:?}", input);
 
@@ -599,7 +606,110 @@ pub fn kmeans_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Out
     println!("Done");
     println!("{:?}", result);
     serde_json::to_value(result)
-} */
+} 
 
 // main function used for debugging
-// To do
+//const BURST_SIZE: u32 = 1;
+//const GROUPS: u32 = 1;
+
+//use kmeans::kmeans_burst;
+
+//pub fn main() {
+//    env_logger::init();
+
+//    let s3_config = S3Config {
+//        region: String::from(""),
+//        aws_access_key_id: "".to_string(),
+//        aws_secret_access_key: "".to_string(),
+//        aws_session_token: "".to_string(),
+//    };
+
+//    let args = Input {
+//        bucket: String::from(""),
+//        key: String::from(""),
+//        s3_config: s3_config,
+//        threshold: 0.00001,
+//        num_dimensions: 2,
+//        num_clusters: 4,
+//        max_iterations: 100,
+//   };
+
+//    if BURST_SIZE % GROUPS != 0 {
+//        panic!("BURST_SIZE must be divisible by GROPUS");
+//    }
+
+//    let group_size = BURST_SIZE / GROUPS;
+
+//    let group_ranges: HashMap<String, HashSet<u32>> = (0..GROUPS)
+//        .map(|group_id| {
+//            (
+//                group_id.to_string(),
+//                ((group_size * group_id)..((group_size * group_id) + group_size)).collect(),
+//            )
+//        })
+//        .collect::<HashMap<String, HashSet<u32>>>();
+
+//    for group_id in 0..GROUPS {
+//       let args_clone = args.clone();
+
+//        let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+//        group(group_id, group_ranges.clone(), args_clone, runtime);
+//    }
+//}
+
+//fn group(
+//    group_id: u32,
+//    group_ranges: HashMap<String, HashSet<u32>>,
+//    args: Input,
+//    runtime: Runtime,
+//) {
+
+//    let binding = group_ranges.clone();
+//    let group_range = binding.get(&group_id.to_string()).unwrap();
+
+//    let mut actors = create_actors(
+//        Config {
+//            backend: Rabbitmq,
+//            server: Some("amqp://guest:guest@localhost:5672".to_string()),
+//            burst_id: "kmeans".to_string(), 
+//            burst_size: BURST_SIZE as u32,
+//            group_ranges,
+//            group_id: group_id.to_string(),
+//            chunking: true,
+            // chunk_size received is in KB
+//            chunk_size: 1024*1024,
+//            tokio_broadcast_channel_size: Some(1024*1024),
+//        },
+//        &runtime,
+//    ).unwrap();
+
+    // Create threads
+//    let mut handlers = Vec::new();
+    
+//    for id in group_range.into_iter() {
+//        let id_clone = id.clone();
+//        let args_clone = args.clone();
+//        let actor = actors.remove(&id_clone).expect(format!("Error getting actor for id: {}", id_clone).as_str());
+//        handlers.push(thread::spawn(move || {
+//            println!("worker_id: {}", id_clone);
+//            println!("input: {:?}", args_clone);
+//            worker(args_clone, actor).unwrap()
+//        }));
+//   }
+
+//    for handle in handlers {
+//        let _ = handle.join().expect("Error joining thread");
+//    }
+//}
+
+//pub fn worker(
+//    args: Input,
+//    burst_middleware: MiddlewareActorHandle,
+//) -> Result<(), Box<dyn std::error::Error>> {
+//    let result = kmeans_burst(args, burst_middleware);
+
+//    println!("Done");
+//    println!("{:?}", result);
+
+//    Ok(())
+//}
