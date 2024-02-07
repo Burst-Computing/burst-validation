@@ -1,16 +1,16 @@
 [package]
-name = "kmeans"
+name = "actions"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-mpi = { version = "0.6", features = ["user-operations", "derive"] }
+# mpi = { version = "0.6", features = ["user-operations", "derive"] }
 rand = "0.8.5"
 nalgebra = "0.23.2"
 smartcore = { version = "0.2.0", features=["nalgebra-bindings"]}
-burst-communication-middleware = { path = "../../burst-communication-middleware" }
+burst-communication-middleware = { path = "../burst-communication-middleware" }
 bytes = "1.5.0"
 tokio = { version = "1.33.0", features = ["full"] }
 log = "0.4.20"
