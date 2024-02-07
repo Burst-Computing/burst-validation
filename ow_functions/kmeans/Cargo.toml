@@ -1,12 +1,12 @@
 [package]
-name = "kmeans"
+name = "actions"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-mpi = { version = "0.6", features = ["user-operations", "derive"] }
+# mpi = { version = "0.6", features = ["user-operations", "derive"] }
 rand = "0.8.5"
 nalgebra = "0.23.2"
 smartcore = { version = "0.2.0", features=["nalgebra-bindings"]}
@@ -22,16 +22,7 @@ aws-config = { version = "1.0.0", features = ["behavior-version-latest"] }
 aws-credential-types = { version = "1.0.0", features = [
     "hardcoded-credentials",
 ] }
-s3reader = "1.0.0"
+serde_json = "1.0"
+serde = "1.0"
+serde_derive = "1.0"
 
-[[bin]]
-name = "main-mpi"
-path = "examples/main-mpi.rs"
-
-[[bin]]
-name = "main-threads"
-path = "examples/main-threads.rs"
-
-[[bin]]
-name = "main-burst"
-path = "examples/main-burst.rs"
