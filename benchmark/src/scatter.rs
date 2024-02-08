@@ -24,7 +24,7 @@ pub fn worker(burst_middleware: MiddlewareActorHandle, payload: usize) -> Out {
     // If id != 0, receiver
     } else {
         info!("Worker {} - started receiving", id);
-        let msg = burst_middleware.scatter(None).unwrap().unwrap();
+        let msg = burst_middleware.scatter(None).unwrap();
         total_size = msg.data.len();
     }
 
