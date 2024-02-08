@@ -14,6 +14,7 @@ if __name__ == "__main__":
     executor = OpenwhiskExecutor(args.ow_host, args.ow_port)
     # TODO: parametrise data that now is hardcoded in json
     params = json.load(open("ow_apps/kmeans/payload2.json"))
+    params = [params[0] for _ in range(4)]
     dt = executor.burst("kmeans-burst",
                         params,
                         memory=1024,

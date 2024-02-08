@@ -1,6 +1,5 @@
 import argparse
 
-
 VALID_BURST_BACKEND_OPTIONS = ["rabbitmq", "redis", "redis_stream", "redis_list", "s3"]
 DEFAULT_DOCKER_IMAGE = "manriurv/rust_burst:1"
 
@@ -18,7 +17,8 @@ def add_burst_to_parser(parser):
     parser.add_argument("--join", type=bool, required=False, help="Join burst workers in same invoker", default=False)
     parser.add_argument("--backend", type=str, required=True, help="Burst communication backend",
                         choices=VALID_BURST_BACKEND_OPTIONS)
-    parser.add_argument("--chunk-size", type=int, required=False, help="Chunk size for burst messages (in KB)", default=1)
+    parser.add_argument("--chunk-size", type=int, required=False, help="Chunk size for burst messages (in KB)",
+                        default=None)
 
 
 def add_openwhisk_to_parser(parser):
