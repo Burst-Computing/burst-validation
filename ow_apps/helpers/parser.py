@@ -2,7 +2,7 @@ import argparse
 
 
 VALID_BURST_BACKEND_OPTIONS = ["rabbitmq", "redis", "redis_stream", "redis_list", "s3"]
-DEFAULT_DOCKER_IMAGE = "manriurv/rust-burst:1"
+DEFAULT_DOCKER_IMAGE = "manriurv/rust_burst:1"
 
 
 def add_terasort_to_parser(parser):
@@ -28,6 +28,7 @@ def add_openwhisk_to_parser(parser):
                         default=None)
     parser.add_argument("--custom-image", type=str, required=False, help="Tag of the docker custom image to use",
                         default=DEFAULT_DOCKER_IMAGE)
+    parser.add_argument("--debug", action=argparse.BooleanOptionalAction, help="Debug mode", default=False)
 
 
 def try_or_except(parser):

@@ -16,6 +16,7 @@ if __name__ == "__main__":
                         memory=args.runtime_memory if args.runtime_memory else 4096,
                         burst_size=args.granularity,
                         join=args.join,
+                        debug_mode=args.debug,
                         backend=args.backend,
                         chunk_size=args.chunk_size,
                         custom_image=args.custom_image,

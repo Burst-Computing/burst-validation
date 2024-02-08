@@ -19,9 +19,10 @@ if __name__ == "__main__":
                         memory=1024,
                         burst_size=args.granularity,
                         join=args.join,
+                        debug_mode=args.debug,
                         backend=args.backend,
                         chunk_size=args.chunk_size,
-                        custom_image="manriurv/rust-burst:1",
+                        custom_image="manriurv/rust_burst:1",
                         is_zip=True)
     dt.plot()
     pprint.pprint(dt.get_results())
