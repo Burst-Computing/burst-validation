@@ -1,9 +1,9 @@
 use std::{collections::HashMap, fs, path::Path, thread, time::SystemTime};
 
 use benchmark::{
-    all_to_all, broadcast, create_proxies, gather, pair, scatter, setup_logging, Arguments,
-    Benchmark, Out,
+    all_to_all, broadcast, gather, pair, scatter, setup_logging, Arguments, Benchmark, Out,
 };
+use burst_communication_middleware::create_actors;
 use clap::Parser;
 use csv::Writer;
 use log::info;
@@ -61,25 +61,30 @@ fn main() {
         );
     }
 
-    let proxies = create_proxies(&args, &tokio_runtime);
+    let actors = match create_actors(args.clone().into(), &tokio_runtime) {
+        Ok(proxies) => proxies,
+        Err(e) => {
+            panic!("Failed to create actors: {}", e);
+        }
+    };
 
     let t = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap();
     info!("start: {}", t.as_millis() as f64 / 1000.0);
 
-    let mut threads = HashMap::with_capacity(proxies.len());
-    for (worker_id, proxy) in proxies {
+    let mut threads = HashMap::with_capacity(actors.len());
+    for (worker_id, actor) in actors {
         let payload_size = args.payload_size;
         let benchmark = args.benchmark.clone();
         let thread = thread::spawn(move || {
             info!("thread start: id={}", worker_id);
             let result = match benchmark {
-                Benchmark::Pair => pair::worker(proxy, payload_size),
-                Benchmark::Broadcast => broadcast::worker(proxy, payload_size),
-                Benchmark::AllToAll => all_to_all::worker(proxy, payload_size),
-                Benchmark::Gather => gather::worker(proxy, payload_size),
-                Benchmark::Scatter => scatter::worker(proxy, payload_size),
+                Benchmark::Pair => pair::worker(actor, payload_size),
+                Benchmark::Broadcast => broadcast::worker(actor, payload_size),
+                Benchmark::AllToAll => all_to_all::worker(actor, payload_size),
+                Benchmark::Gather => gather::worker(actor, payload_size),
+                Benchmark::Scatter => scatter::worker(actor, payload_size),
             };
             info!("thread end: id={}", worker_id);
             return result;

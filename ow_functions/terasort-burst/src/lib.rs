@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    env,
     fs::File,
     io::Cursor,
     iter::zip,
@@ -8,7 +9,7 @@ use std::{
 };
 
 use burst_communication_middleware::{
-    BurstMiddleware, BurstOptions, MiddlewareActorHandle, RabbitMQMImpl, RabbitMQOptions,
+    BurstMiddleware, BurstOptions, MiddlewareActorHandle,
     TokioChannelImpl, TokioChannelOptions,
 };
 use bytes::Bytes;
@@ -44,7 +45,6 @@ struct Input {
     mpu_id: String,
     tmp_prefix: String,
     s3_config: S3Config,
-    rabbitmq_config: RabbitMQConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -53,11 +53,6 @@ struct S3Config {
     endpoint: String,
     aws_access_key_id: String,
     aws_secret_access_key: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct RabbitMQConfig {
-    uri: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
