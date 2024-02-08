@@ -2,6 +2,7 @@ from datetime import datetime
 
 from matplotlib import pyplot as plt
 import matplotlib.dates as mdates
+from ow_client.logger import logger
 
 from ow_client.utils import debug
 
@@ -41,7 +42,7 @@ class ResultDataset:
             roi["end"] = end
             roi["result"] = result
         else:
-            debug("Error: result not found")
+            logger.debug("Error: result not found")
 
     def get_results(self):
         return list(map(lambda x: x["result"], self.results))

@@ -1,6 +1,7 @@
 import argparse
 import json
 import pprint
+from ow_client.logger import logger
 
 from ow_apps.helpers.parser import add_burst_to_parser, try_or_except, add_openwhisk_to_parser, add_kmeans_to_parser
 from ow_client.openwhisk_executor import OpenwhiskExecutor
@@ -30,5 +31,5 @@ if __name__ == "__main__":
     result = dt.get_results()
     result = [item for sublist in result for item in sublist]
     result = list(filter(None, result))
-    print("\n***** The kmeans result is: *****\n")
-    pprint.pprint(result[0])
+    logger.info("***** The kmeans result is: *****")
+    logger.info(result[0])

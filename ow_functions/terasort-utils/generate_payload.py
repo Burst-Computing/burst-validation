@@ -161,7 +161,7 @@ def main():
     #print(mpu_res)
     mpu_id = mpu_res["UploadId"]
 
-    pprint(segment_bounds)
+    # pprint(segment_bounds)
 
     # Write parameters as JSON file
     params = [

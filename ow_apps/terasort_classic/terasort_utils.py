@@ -139,10 +139,10 @@ def generate_payload(endpoint, partitions, bucket, key, sort_column, sort_output
         else key + ".sorted"
     )
     mpu_res = s3_client.create_multipart_upload(Bucket=bucket, Key=output_key)
-    print(mpu_res)
+    # print(mpu_res)
     mpu_id = mpu_res["UploadId"]
 
-    pprint(segment_bounds)
+    # pprint(segment_bounds)
 
     # Write parameters as JSON file
     return [
@@ -175,7 +175,7 @@ def complete_mpu(endpoint, bucket, key, upload_id, mpu):
                              aws_secret_access_key=AWS_SECRET_ACCESS_KEY, region_name=AWS_S3_REGION)
     result = s3_client.complete_multipart_upload(Bucket=bucket, Key=key, UploadId=upload_id,
                                                  MultipartUpload=mpu)
-    print(result)
+    # print(result)
 
 
 

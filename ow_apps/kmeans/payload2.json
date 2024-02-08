@@ -4,9 +4,9 @@
     "key": "kmeans",
     "s3_config": {
       "region": "us-east-1",
-      "aws_access_key_id": "ASIA2WAGAX3JICJ3KXFE",
-      "aws_secret_access_key": "nWUgDylF49Co/UvrJ65C/VPmALluzjwrF52v9bpT",
-      "aws_session_token": "IQoJb3JpZ2luX2VjECgaCXVzLWVhc3QtMSJHMEUCIDl8uWzQj20FcRYFBvPvcHT8x1c2Icumn8j3l0bfhuj8AiEAiBLp628KoEAQLMEzr0PQ/dWXX+XMiqKksmsyRm2ayaEqgQMI8P//////////ARAAGgw3MzQ0NTIwMzkzNzgiDNVAyxYrfDNKOaDCUSrVAm02nYWbmL6t9ttvibIZk5EdmZnb6zb+uzh6B4GnwKuLenyQyQyFINBWW6tSwWcAvXu9sjkRw2tle0mM6XyKD5Xo/E0G+DvxMfT7qzzr1+WZ2kaTbSgWrSKpMRnCrEuIdGSkF4MUSBgBWx2b77ioElgK9tbeGojCbHD7F25zrzOxKtBuyDcoUPW9E6GYlMz2wlRC1TD3Y/XtY1SVxFVDhjDIMcWgokPjre8RYpWdMWl4gyy9K6mr5OOxV6SE8eU+tNhz5iXy0KFKbzFUi6pfUcauhjrJGGDZne+4UcpoWrfezFPcbhztwNAcfStJ6lk7vorczBEaAsbgyzaM648oYO8146hJ7qu8aZCUGx56oSGdoZSMCYZGm+RZf87S2DTTysBxF4U6OwKW47vFJ4OqDS8Pod6ii594FRTI6mwPddEnRHH9fstDyY3ltRc3SiAfsfeXUcbGMOffk64GOqcBNcwfppsbJxRWi6ji5lh6YkoCnQ9HlM24LmmTesfV4eS2FwNesxvmRiuWL7nOfXKUwrbaVIxII/Lrw0/AyySmvy+Ay+y+NCKeD2n35CgLmyVfaecJxUBzCzkLymxDsGqg/ODeGqrmrEJosArGnaiporPkX394hWrSaHoQr7aYS+Eehbhcf0LCrTXps6DlAQuZMFMU1sftDo/ywDAVYdiCPP6bIDDSBmM="
+      "aws_access_key_id": "",
+      "aws_secret_access_key": "",
+      "aws_session_token": ""
     },
     "threshold": 0.5,
     "num_dimensions": 2,

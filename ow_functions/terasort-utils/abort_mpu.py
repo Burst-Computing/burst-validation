@@ -11,6 +11,6 @@ if __name__ == '__main__':
     
     if mpus is not None:
         for mpu in mpus:
-            print("Deleting: ", mpu['Key'])
+            # print("Deleting: ", mpu['Key'])
             s3_client.abort_multipart_upload(Bucket=BUCKET, Key=mpu['Key'], UploadId=mpu['UploadId'])
         

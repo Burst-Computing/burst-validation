@@ -1,5 +1,6 @@
 import argparse
 import pprint
+from ow_client.logger import logger
 
 from ow_apps.helpers.parser import add_burst_to_parser, try_or_except, add_openwhisk_to_parser
 from ow_client.openwhisk_executor import OpenwhiskExecutor
@@ -22,4 +23,4 @@ if __name__ == "__main__":
                         custom_image=args.custom_image,
                         is_zip=True)
     dt.plot()
-    pprint.pprint(dt.get_results())
+    logger.info(dt.get_results())

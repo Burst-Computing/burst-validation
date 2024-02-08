@@ -2,10 +2,12 @@ import base64
 import sys
 import time
 import warnings
+import logging
 
 import requests
 from typing import List
 from urllib3.exceptions import InsecureRequestWarning
+from ow_client.logger import logger
 
 from ow_client import utils
 from ow_client.result_dataset import ResultDataset
@@ -24,8 +26,8 @@ class OpenwhiskExecutor:
         self.session.verify = False
         warnings.filterwarnings('ignore', category=InsecureRequestWarning)
         self.__monitor_interval = 2  # seconds
-        if debug:
-            utils.DEBUGGING = True
+        logger.setLevel(logging.DEBUG if debug else logging.INFO)
+        logger.info("OpenwhiskExecutor initialized")
 
     def burst(self, action_name, params_list, is_zip=False, memory=256, debug_mode=False, custom_image=None,
               backend="rabbitmq",
@@ -110,9 +112,9 @@ class OpenwhiskExecutor:
             json=action_data)
 
         if response.status_code == 200:
-            print(f"Function {action_name} created in Openwhisk successfully")
+            logger.info(f"Function {action_name} created in Openwhisk successfully")
         else:
-            print(f"Error creating function {action_name}: {response.text}")
+            logger.info(f"Error creating function {action_name}: {response.text}")
 
     def __invoke_single_action(self, action_name, params):
         invoke_url = f"{self.protocol}://{self.host}:{self.port}/api/v1/namespaces/guest/actions/{action_name}"
@@ -120,28 +122,30 @@ class OpenwhiskExecutor:
         response = self.session.post(invoke_url, json=params)
 
         if str(response.status_code).startswith("2"):
-            print(f"Function {action_name} invoked in Openwhisk successfully")
+            logger.info(f"Function {action_name} invoked in Openwhisk successfully")
             result = response.json()
             return result["activationId"]
         else:
-            print(f"[ERROR] Function not invoked {action_name}: {response.text}")
+            logger.error(f"Function not invoked {action_name}: {response.text}")
             return None
 
     def __check_function_finished(self, activation_id):
         activation_get_url = f"{self.protocol}://{self.host}:{self.port}/api/v1/namespaces/guest/activations/{activation_id}"
         response = self.session.get(activation_get_url)
         if str(response.status_code).startswith("2"):
-            debug(f"Querying function {activation_id} to Openwhisk")
-            ppdegub(response.json())
+            logger.debug(f"Querying function {activation_id} to Openwhisk")
+            logger.debug(response.json())
             result_invk = response.json()
             if result_invk["response"]["result"]:
-                print(f"Function {activation_id} finished")
+                logger.info(f"Function {activation_id} finished")
                 return result_invk
             else:
-                print(f"[ERROR] Function {activation_id} bad finished")
+                logger.error(f"Function {activation_id} bad finished")
                 return None
+        elif response.status_code == 404:
+            return None
         else:
-            debug(f"Function {activation_id} not finished: {response.text}")
+            logger.debug(f"Function {activation_id} not finished: {response.text}")
             return None
 
     def __wait_for_completion(self, dataset):
@@ -154,7 +158,7 @@ class OpenwhiskExecutor:
                     dataset.add_result(item["activationId"], result["start"], result["end"],
                                        result["response"]["result"])
             monitor_count += 1
-            debug(f"Monitor count: {monitor_count}")
+            logger.debug(f"Monitor count: {monitor_count}")
             time.sleep(self.__monitor_interval)
         return dataset
 
@@ -172,9 +176,9 @@ class OpenwhiskExecutor:
         response = self.session.post(burst_url, json=params_list)
 
         if str(response.status_code).startswith("2"):
-            print(f"Burst {action_name} invoked successfully")
             result = response.json()
+            logger.info(f"Burst {action_name} invoked successfully. Actions: {result['activationIds']}")
             return result["activationIds"]
         else:
-            print(f"[ERROR] Burst not invoked {action_name}: {response.text}")
+            logger.error(f"Burst not invoked {action_name}: {response.text}")
             return None
