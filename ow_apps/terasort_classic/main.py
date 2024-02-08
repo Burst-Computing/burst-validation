@@ -16,7 +16,7 @@ if __name__ == "__main__":
     params = generate_payload(endpoint=args.ts_endpoint, partitions=args.partitions, bucket=args.bucket, key=args.key,
                               sort_column=0)
 
-    executor = OpenwhiskExecutor(args.ow_host, args.ow_port)
+    executor = OpenwhiskExecutor(args.ow_host, args.ow_port, args.debug)
     dt_map = executor.map("terasort-map", params,
                           memory=args.runtime_memory if args.runtime_memory else 256,
                           custom_image=args.custom_image, is_zip=True)

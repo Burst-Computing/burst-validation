@@ -24,7 +24,8 @@ class OpenwhiskExecutor:
         self.session.verify = False
         warnings.filterwarnings('ignore', category=InsecureRequestWarning)
         self.__monitor_interval = 2  # seconds
-        utils.DEBUGGING = True
+        if debug:
+            utils.DEBUGGING = True
 
     def burst(self, action_name, params_list, is_zip=False, memory=256, debug_mode=False, custom_image=None,
               backend="rabbitmq",
@@ -109,9 +110,9 @@ class OpenwhiskExecutor:
             json=action_data)
 
         if response.status_code == 200:
-            debug(f"Función {action_name} creada con éxito en OpenWhisk")
+            print(f"Function {action_name} created in Openwhisk successfully")
         else:
-            debug(f"Error al crear la función {action_name}: {response.text}")
+            print(f"Error creating function {action_name}: {response.text}")
 
     def __invoke_single_action(self, action_name, params):
         invoke_url = f"{self.protocol}://{self.host}:{self.port}/api/v1/namespaces/guest/actions/{action_name}"
@@ -119,28 +120,28 @@ class OpenwhiskExecutor:
         response = self.session.post(invoke_url, json=params)
 
         if str(response.status_code).startswith("2"):
-            debug(f"Función {action_name} invocada con éxito en OpenWhisk")
+            print(f"Function {action_name} invoked in Openwhisk successfully")
             result = response.json()
             return result["activationId"]
         else:
-            debug(f"Error al invocar la función {action_name}: {response.text}")
+            print(f"[ERROR] Function not invoked {action_name}: {response.text}")
             return None
 
     def __check_function_finished(self, activation_id):
         activation_get_url = f"{self.protocol}://{self.host}:{self.port}/api/v1/namespaces/guest/activations/{activation_id}"
         response = self.session.get(activation_get_url)
         if str(response.status_code).startswith("2"):
-            debug(f"Función {activation_id} consultada con éxito en OpenWhisk")
+            debug(f"Querying function {activation_id} to Openwhisk")
             ppdegub(response.json())
             result_invk = response.json()
             if result_invk["response"]["result"]:
-                debug(f"Función {activation_id} finalizada con éxito en OpenWhisk")
+                print(f"Function {activation_id} finished")
                 return result_invk
             else:
-                debug(f"Función {activation_id} finalizada con error en OpenWhisk")
+                print(f"[ERROR] Function {activation_id} bad finished")
                 return None
         else:
-            debug(f"Error al consultar la función {activation_id}: {response.text}")
+            debug(f"Function {activation_id} not finished: {response.text}")
             return None
 
     def __wait_for_completion(self, dataset):
@@ -171,9 +172,9 @@ class OpenwhiskExecutor:
         response = self.session.post(burst_url, json=params_list)
 
         if str(response.status_code).startswith("2"):
-            debug(f"Burst {action_name} invocado con éxito en OpenWhisk")
+            print(f"Burst {action_name} invoked successfully")
             result = response.json()
             return result["activationIds"]
         else:
-            debug(f"Error al invocar el burst {action_name}: {response.text}")
+            print(f"[ERROR] Burst not invoked {action_name}: {response.text}")
             return None

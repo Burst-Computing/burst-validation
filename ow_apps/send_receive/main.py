@@ -10,7 +10,7 @@ if __name__ == "__main__":
     add_burst_to_parser(parser)
     args = try_or_except(parser)
 
-    executor = OpenwhiskExecutor(args.ow_host, args.ow_port)
+    executor = OpenwhiskExecutor(args.ow_host, args.ow_port, args.debug)
     dt = executor.burst("send-receive",
                         [{"key": "value"}, {"key": "value"}],
                         memory=args.runtime_memory if args.runtime_memory else 4096,

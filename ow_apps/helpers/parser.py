@@ -12,6 +12,10 @@ def add_terasort_to_parser(parser):
     parser.add_argument("--key", type=str, required=True, help="Terasort object key")
 
 
+def add_kmeans_to_parser(parser):
+    parser.add_argument("--workers", type=int, help="Number of workers to use", required=True)
+
+
 def add_burst_to_parser(parser):
     parser.add_argument("--granularity", type=int, required=False, help="Granularity of burst workers", default=None)
     parser.add_argument("--join", type=bool, required=False, help="Join burst workers in same invoker", default=False)
