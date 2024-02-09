@@ -94,6 +94,9 @@ pub enum Backend {
         /// S3 session token
         #[arg(long = "session-token", required = false)]
         session_token: Option<String>,
+        /// S3 semaphore permits
+        #[arg(long = "semaphore-permits", required = false)]
+        semaphore_permits: Option<usize>,
     },
     /// Use Redis Streams as backend
     RedisStream,
@@ -114,6 +117,7 @@ impl Display for Backend {
                 access_key_id: _,
                 secret_access_key: _,
                 session_token: _,
+                semaphore_permits: _,
             } => {
                 write!(f, "S3")?;
             }
@@ -180,12 +184,14 @@ impl From<Arguments> for Config {
                 access_key_id,
                 secret_access_key,
                 session_token,
+                semaphore_permits,
             } => burst_communication_middleware::Backend::S3 {
                 bucket,
                 region,
                 access_key_id,
                 secret_access_key,
                 session_token,
+                semaphore_permits,
             },
             Backend::RedisStream => burst_communication_middleware::Backend::RedisStream,
             Backend::RedisList => burst_communication_middleware::Backend::RedisList,
