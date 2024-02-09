@@ -6,7 +6,7 @@ edition = "2021"
 resolver = "2"
 
 [dependencies]
-burst-communication-middleware = { path = "../burst-communication-middleware" }
+burst-communication-middleware = { path = "../../burst-communication-middleware" }
 # aws-config = { git = "https://github.com/awslabs/aws-sdk-rust", branch = "next" }
 # aws-sdk-s3 = { git = "https://github.com/awslabs/aws-sdk-rust", branch = "next" }
 rusoto_core = "0.48.0"

@@ -1,17 +1,6 @@
-use std::{
-    collections::{HashMap, HashSet},
-    env,
-    fs::File,
-    io::Cursor,
-    iter::zip,
-    thread,
-    time::Instant,
-};
+use std::{collections::HashMap, io::Cursor, time::Instant};
 
-use burst_communication_middleware::{
-    BurstMiddleware, BurstOptions, MiddlewareActorHandle,
-    TokioChannelImpl, TokioChannelOptions,
-};
+use burst_communication_middleware::MiddlewareActorHandle;
 use bytes::Bytes;
 use polars::{
     chunked_array::{ops::SortOptions, ChunkedArray},
@@ -105,9 +94,9 @@ async fn upload_chunk_result(s3_client: &S3Client, args: &Input, buf: Vec<u8>) -
         body: Some(buf.into()),
         ..Default::default()
     };
-    println!("{:?}", mpu_input);
+    // println!("{:?}", mpu_input);
     let part_upload_res = s3_client.upload_part(mpu_input).await.unwrap();
-    println!("{:?}", part_upload_res);
+    // println!("{:?}", part_upload_res);
     part_upload_res.e_tag.unwrap()
 }
 
@@ -131,9 +120,17 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
     let get_t0 = Instant::now();
     let chunk = tokio_runtime.block_on(get_chunk(&s3_client, &args));
     let get_duration = get_t0.elapsed();
-    println!("Get time: {:?}", get_duration);
-    println!("Buffer size: {}", chunk.len());
+    println!(
+        "[Worker {}] Get time: {:?}",
+        burst_middleware.info.worker_id, get_duration
+    );
+    println!(
+        "[Worker {}] Buffer size: {}",
+        burst_middleware.info.worker_id,
+        chunk.len()
+    );
 
+    // Load the chunk into a DataFrame
     let cursor = Cursor::new(chunk);
     let df_chunk: DataFrame = CsvReader::new(cursor)
         .infer_schema(Some(1))
@@ -142,7 +139,7 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
         .finish()
         .unwrap();
 
-    // save index in a hashmap
+    // Here we calculate using binary search the indexes to which bucket each row should go
     let mut indexes: HashMap<u32, Vec<u32>> = HashMap::new();
     let shuffle_t0 = Instant::now();
     for (idx, value) in df_chunk[args.sort_column as usize].iter().enumerate() {
@@ -168,9 +165,11 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
     }
 
     for (bucket, idxs) in indexes {
-        let a = ChunkedArray::from_vec("partition", idxs);
-        let mut partition_df = df_chunk.take(&a).unwrap();
+        // Get the rows that belong to this bucket taking the indexes calculated before
+        let chunked_array = ChunkedArray::from_vec("partition", idxs);
+        let mut partition_df = df_chunk.take(&chunked_array).unwrap();
 
+        // Serialize the partition to CSV and send it to the corresponding worker
         let mut buf = Vec::new();
         let write_start_t = Instant::now();
         CsvWriter::new(&mut buf)
@@ -179,23 +178,33 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
             .finish(&mut partition_df)
             .unwrap();
         let write_duration = write_start_t.elapsed();
-        println!("Serialize time: {:?}", write_duration);
+        println!(
+            "[Worker {}] Serialize time: {:?}",
+            burst_middleware.info.worker_id, write_duration
+        );
 
         println!(
-            "Going to send partition to worker {}, size = {}",
+            "[Worker {}] Going to send partition to worker {}, size = {}",
+            burst_middleware.info.worker_id,
             bucket,
             buf.len()
         );
         let send_t0 = Instant::now();
         burst_middleware.send(bucket, Bytes::from(buf)).unwrap();
         let send_duration = send_t0.elapsed();
-        println!("Send time: {:?}", send_duration);
+        println!(
+            "[Worker {}] Send time: {:?}",
+            burst_middleware.info.worker_id, send_duration
+        );
     }
 
     let mut agg_df: Option<DataFrame> = None;
     for i in 0..args.partitions {
         let msg = burst_middleware.recv(i).unwrap();
-        println!("Received partition {} from worker {}", i, msg.sender_id);
+        println!(
+            "[Worker {}] Received partition {} from worker {}",
+            burst_middleware.info.worker_id, i, msg.sender_id
+        );
         let cursor = Cursor::new(msg.data);
 
         let mut df_chunk: DataFrame = CsvReader::new(cursor)
@@ -215,11 +224,19 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
         agg_df = Some(df);
     }
     let shuffle_duration = shuffle_t0.elapsed();
-    println!("Shuffle time: {:?}", shuffle_duration);
+    println!(
+        "[Worker {}] Shuffle time: {:?}",
+        burst_middleware.info.worker_id, shuffle_duration
+    );
 
     let mut agg_df = agg_df.unwrap();
     let agg_df = agg_df.align_chunks();
-    println!("Bucket {} has {} rows", args.partition_idx, agg_df.height());
+    println!(
+        "[Worker {}] Bucket {} has {} rows",
+        burst_middleware.info.worker_id,
+        args.partition_idx,
+        agg_df.height()
+    );
 
     // println!("{:?}", agg_df.get_column_names()[0]);
 
@@ -238,7 +255,10 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
         )
         .unwrap();
     let sort_duration = sort_start_t.elapsed();
-    println!("Sort time: {:?}", sort_duration);
+    println!(
+        "[Worker {}] Sort time: {:?}",
+        burst_middleware.info.worker_id, sort_duration
+    );
 
     let mut buf = Vec::new();
     let write_start_t = Instant::now();
@@ -248,14 +268,20 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
         .finish(&mut agg_df)
         .unwrap();
     let write_duration = write_start_t.elapsed();
-    println!("Serialize time: {:?}", write_duration);
+    println!(
+        "[Worker {}] Serialize time: {:?}",
+        burst_middleware.info.worker_id, write_duration
+    );
 
     let put_part_t0 = Instant::now();
     let etag = tokio_runtime.block_on(upload_chunk_result(&s3_client, &args, buf));
     let put_part_duration = put_part_t0.elapsed();
-    println!("Put part time: {:?}", put_part_duration);
+    println!(
+        "[Worker {}] Put part time: {:?}",
+        burst_middleware.info.worker_id, put_part_duration
+    );
 
-    println!("etag: {}", etag);
+    // println!("etag: {}", etag);
     Output {
         bucket: args.bucket,
         key: args.mpu_key,
