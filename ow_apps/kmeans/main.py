@@ -19,7 +19,7 @@ if __name__ == "__main__":
     params = [params[0] for _ in range(args.workers)]
     dt = executor.burst("kmeans-burst",
                         params,
-                        memory=1024,
+                        memory=args.runtime_memory,
                         burst_size=args.granularity,
                         join=args.join,
                         debug_mode=args.debug,

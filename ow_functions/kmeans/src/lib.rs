@@ -1,4 +1,3 @@
-use aws_sdk_s3::Client;
 use nalgebra::DMatrix;
 use std::io::{BufRead, Cursor};
 use std::str::FromStr;
@@ -14,10 +13,8 @@ use std::io::BufReader;
 
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
-use aws_config::meta::region::RegionProviderChain;
-use aws_config::BehaviorVersion;
-use aws_config::Region;
-use aws_credential_types::Credentials;
+use rusoto_core::Region;
+use rusoto_s3::{GetObjectRequest, S3Client, S3};
 
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{Error, Value};
@@ -28,6 +25,7 @@ use log::{error, info};
 use std::collections::{HashMap, HashSet};
 use std::thread;
 
+use tokio::io::AsyncReadExt;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
  struct Input {
@@ -43,9 +41,9 @@ use std::thread;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
  struct S3Config {
      region: String,
+     endpoint: String,
      aws_access_key_id: String,
      aws_secret_access_key: String,
-     aws_session_token: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -59,26 +57,34 @@ use std::thread;
 
 async fn get_matrix_from_s3(args: &Input) -> Result<DMatrix<f32>, Box<dyn stdError>> {
 
-    let credentials_provider = Credentials::from_keys(
+    let client = rusoto_core::request::HttpClient::new().unwrap();
+    let region = Region::Custom {
+        name: args.s3_config.region.clone(),
+        endpoint: args.s3_config.endpoint.clone(),
+    };
+    let creds = rusoto_core::credential::StaticProvider::new_minimal(
         args.s3_config.aws_access_key_id.clone(),
         args.s3_config.aws_secret_access_key.clone(),
-        Some(args.s3_config.aws_session_token.clone()),
     );
+    let s3_client = S3Client::new_with(client, creds, region);
 
-    let region_provider =
-        RegionProviderChain::first_try(Region::new(args.s3_config.region.clone()));
+    let object = s3_client
+        .get_object(GetObjectRequest {
+            bucket: args.bucket.clone(),
+            key: args.key.clone(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
 
-    let config = aws_config::defaults(BehaviorVersion::latest())
-        .region(region_provider)
-        .credentials_provider(credentials_provider)
-        .load()
-        .await;
+    let mut buffer: Vec<u8> = Vec::new();
+    let mut reader = object.body.unwrap().into_async_read();
 
-    let client = Client::new(&config);
-
-    let object = client.get_object().bucket(&args.bucket).key(&args.key).send().await.unwrap();
-
-    let buffer = object.body.collect().await.map(|data| data.into_bytes()).unwrap();
+    while let Ok(sz) = reader.read_buf(&mut buffer).await {
+        if sz == 0 {
+            break;
+        }
+    }
 
     let cursor = Cursor::new(buffer);
 
@@ -195,7 +201,7 @@ fn get_timer() -> Duration {
 }
 
  fn kmeans_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Option<Output> {
-    
+
     let start_total = get_timer();
 
     let mut communication: Duration = Default::default();
@@ -238,7 +244,7 @@ fn get_timer() -> Duration {
 
     println!("Start: {:?}", start_partition);
     println!("Partition: {:?}", partition_points);
-    
+
     let mut local_partition = data
         .rows(
             start_partition.try_into().unwrap(),
@@ -580,7 +586,7 @@ fn get_timer() -> Duration {
 
     let end_total = get_timer();
 
-    let total_time = end_total - start_total; 
+    let total_time = end_total - start_total;
 
     if burst_middleware.info.worker_id == 0 {
         return Some(Output {
@@ -593,7 +599,7 @@ fn get_timer() -> Duration {
     }
 
     None
-    
+
 }
 
 // ow_main would be the entry point of an actual open whisk burst worker
@@ -606,7 +612,7 @@ pub fn main(args: Value, burst_middleware: MiddlewareActorHandle) -> Result<Valu
     println!("Done");
     println!("{:?}", result);
     serde_json::to_value(result)
-} 
+}
 
 // main function used for debugging
 //const BURST_SIZE: u32 = 1;
@@ -671,7 +677,7 @@ pub fn main(args: Value, burst_middleware: MiddlewareActorHandle) -> Result<Valu
 //        Config {
 //            backend: Rabbitmq,
 //            server: Some("amqp://guest:guest@localhost:5672".to_string()),
-//            burst_id: "kmeans".to_string(), 
+//            burst_id: "kmeans".to_string(),
 //            burst_size: BURST_SIZE as u32,
 //            group_ranges,
 //            group_id: group_id.to_string(),
@@ -685,7 +691,7 @@ pub fn main(args: Value, burst_middleware: MiddlewareActorHandle) -> Result<Valu
 
     // Create threads
 //    let mut handlers = Vec::new();
-    
+
 //    for id in group_range.into_iter() {
 //        let id_clone = id.clone();
 //        let args_clone = args.clone();

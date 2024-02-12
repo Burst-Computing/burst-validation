@@ -3,10 +3,10 @@
     "bucket": "lithops-manriurv",
     "key": "kmeans",
     "s3_config": {
+      "endpoint": "https://s3.amazonaws.com",
       "region": "us-east-1",
       "aws_access_key_id": "",
-      "aws_secret_access_key": "",
-      "aws_session_token": ""
+      "aws_secret_access_key": ""
     },
     "threshold": 0.5,
     "num_dimensions": 2,
