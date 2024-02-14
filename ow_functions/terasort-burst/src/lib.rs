@@ -23,7 +23,7 @@ extern crate serde_json;
 struct Input {
     bucket: String,
     key: String,
-    obj_size: u32,
+    obj_size: u64,
     sort_column: u32,
     delimiter: char,
     partitions: u32,
