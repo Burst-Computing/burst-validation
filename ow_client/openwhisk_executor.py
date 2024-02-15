@@ -155,6 +155,7 @@ class OpenwhiskExecutor:
             for item in missing_results:
                 result = self.__check_function_finished(item["activationId"])
                 if result:
+                    logger.info(f"[{item['activationId']} finished]: {result['response']['result']}")
                     dataset.add_result(item["activationId"], result["start"], result["end"],
                                        result["response"]["result"])
             monitor_count += 1
@@ -164,7 +165,7 @@ class OpenwhiskExecutor:
 
     def __invoke_burst_actions(self, action_name, params_list, burst_size,
                                backend, chunk_size, join, debug_mode) -> List[str] | None:
-        burst_url = f"{self.protocol}://{self.host}:{self.port}/api/v1/namespaces/guest/actions/{action_name}?burst=true"
+        burst_url = f"{self.protocol}://{self.host}:{self.port}/api/v1/namespaces/guest/actions/{action_name}?burst=true&timeout=300000"
         if burst_size:
             burst_url += f"&granularity={burst_size}"
         if join:

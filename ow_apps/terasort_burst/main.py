@@ -31,5 +31,7 @@ if __name__ == "__main__":
     flattened_results = [item for sublist in dt.get_results() for item in sublist]
     flattened_results.sort(key=lambda x: x['part_number'])
 
-    complete_mpu(endpoint=args.ts_endpoint, bucket=args.bucket, key=params[0]['mpu_key'], upload_id=params[0]["mpu_id"],
-                 mpu={"Parts": [{"ETag": i['etag'], "PartNumber": i['part_number'] + 1} for i in flattened_results]})
+    # complete_mpu(endpoint=args.ts_endpoint, bucket=args.bucket, key=params[0]['mpu_key'],
+    #              upload_id=params[0]["mpu_id"],
+    #              mpu={"Parts": [{"ETag": i['etag'], "PartNumber": i['part_number'] + 1} for i in flattened_results]})
+    print("Dummy MPU completion done!")

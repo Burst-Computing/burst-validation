@@ -53,17 +53,21 @@ struct Output {
 }
 
 async fn get_chunk(s3_client: &S3Client, args: &Input) -> Vec<u8> {
-    let chunk_size = (args.obj_size as f64 / args.partitions as f64).ceil() as u32;
+    // TODO: last chunk is very small than others.
+    // Implement +-1 chunking to make it more balanced and avoid failures in MPUs
+    let row_size = args.row_size as u64;
+    let chunk_size = ((args.obj_size as f64 / args.partitions as f64) / row_size as f64).ceil() as u64 * row_size;
 
-    let byte_range = (
-        args.partition_idx * chunk_size,
-        (args.partition_idx * chunk_size) + chunk_size,
-    );
-    // let byte_range = (
-    //     (args.row_size - (byte_range.0 % args.row_size)) + byte_range.0,
-    //     (args.row_size - (byte_range.1 % args.row_size)) + byte_range.1,
-    // );
-    // println!("Byte range: {:?}", byte_range);
+    let start_byte = args.partition_idx as u64 * chunk_size;
+    let end_byte = (args.partition_idx + 1) as u64 * chunk_size;
+
+    let end_byte = if end_byte > args.obj_size {
+        args.obj_size
+    } else {
+        end_byte
+    };
+
+    let byte_range = (start_byte, end_byte);
 
     let get_res = s3_client
         .get_object(GetObjectRequest {
@@ -85,7 +89,17 @@ async fn get_chunk(s3_client: &S3Client, args: &Input) -> Vec<u8> {
     return buffer;
 }
 
-async fn upload_chunk_result(s3_client: &S3Client, args: &Input, buf: Vec<u8>) -> String {
+async fn upload_chunk_result(args: &Input, buf: Vec<u8>) -> String {
+    let client = rusoto_core::request::HttpClient::new().unwrap();
+    let region = Region::Custom {
+        name: args.s3_config.region.clone(),
+        endpoint: args.s3_config.endpoint.clone(),
+    };
+    let creds = rusoto_core::credential::StaticProvider::new_minimal(
+        args.s3_config.aws_access_key_id.clone(),
+        args.s3_config.aws_secret_access_key.clone(),
+    );
+    let s3_client = S3Client::new_with(client, creds, region);
     let mpu_input = rusoto_s3::UploadPartRequest {
         bucket: args.bucket.clone(),
         key: args.mpu_key.clone(),
@@ -274,7 +288,7 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
     );
 
     let put_part_t0 = Instant::now();
-    let etag = tokio_runtime.block_on(upload_chunk_result(&s3_client, &args, buf));
+    let etag = tokio_runtime.block_on(upload_chunk_result(&args, buf));
     let put_part_duration = put_part_t0.elapsed();
     println!(
         "[Worker {}] Put part time: {:?}",
