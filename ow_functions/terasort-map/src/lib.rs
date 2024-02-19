@@ -1,4 +1,5 @@
 use std::{collections::HashMap, env, fs::File, io::Cursor, time::Instant};
+use std::time::{ SystemTime, SystemTimeError, UNIX_EPOCH };
 
 use polars::prelude::{
     AnyValue, ChunkedArray, CsvReader, CsvWriter, DataFrame, QuoteStyle, SerReader, SerWriter,
@@ -15,7 +16,7 @@ extern crate serde_json;
 struct Input {
     bucket: String,
     key: String,
-    obj_size: u32,
+    obj_size: u64,
     sort_column: u32,
     delimiter: char,
     partitions: u32,
@@ -25,8 +26,7 @@ struct Input {
     mpu_key: String,
     mpu_id: String,
     tmp_prefix: String,
-    s3_config: S3Config,
-    rabbitmq_config: RabbitMQConfig,
+    s3_config: S3Config
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -38,17 +38,25 @@ struct S3Config {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct RabbitMQConfig {
-    uri: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Output {
     partition_idx: u32,
     reduce_keys: Vec<String>,
+    init_fn_map: String,
+    post_download_map: String,
+    pre_upload_map: String,
+    end_fn_map: String
+}
+
+fn get_timestamp_in_milliseconds() -> Result<u128, SystemTimeError> {
+  let current_system_time = SystemTime::now();
+  let duration_since_epoch = current_system_time.duration_since(UNIX_EPOCH)?;
+  let milliseconds_timestamp = duration_since_epoch.as_millis();
+
+  Ok(milliseconds_timestamp)
 }
 
 async fn sort_map(args: Input) -> Output {
+    let init_fn_map = get_timestamp_in_milliseconds().unwrap().to_string();
     // using abandoned rusoto lib because aws sdk beta sucks and does not work with minio
     let client = rusoto_core::request::HttpClient::new().unwrap();
     let region = Region::Custom {
@@ -61,12 +69,19 @@ async fn sort_map(args: Input) -> Output {
     );
     let s3_client = S3Client::new_with(client, creds, region);
 
-    let chunk_size = (args.obj_size as f64 / args.partitions as f64).ceil() as u32;
+    let row_size = args.row_size as u64;
+    let chunk_size = ((args.obj_size as f64 / args.partitions as f64) / row_size as f64).ceil() as u64 * row_size;
 
-    let byte_range = (
-        args.partition_idx * chunk_size,
-        (args.partition_idx * chunk_size) + chunk_size,
-    );
+    let start_byte = args.partition_idx as u64 * chunk_size;
+    let end_byte = (args.partition_idx + 1) as u64 * chunk_size;
+
+    let end_byte = if end_byte > args.obj_size {
+        args.obj_size
+    } else {
+        end_byte
+    };
+
+    let byte_range = (start_byte, end_byte);
     // let byte_range = (
     //     (args.row_size - (byte_range.0 % args.row_size)) + byte_range.0,
     //     (args.row_size - (byte_range.1 % args.row_size)) + byte_range.1,
@@ -84,6 +99,7 @@ async fn sort_map(args: Input) -> Output {
         .await
         .unwrap();
 
+
     let mut buffer: Vec<u8> = Vec::with_capacity(((byte_range.1 - byte_range.0) + 1) as usize);
     let mut reader = get_res.body.unwrap().into_async_read();
     while let Ok(sz) = reader.read_buf(&mut buffer).await {
@@ -91,6 +107,8 @@ async fn sort_map(args: Input) -> Output {
             break;
         }
     }
+
+    let post_download_map = get_timestamp_in_milliseconds().unwrap().to_string();
     let get_duration = get_t0.elapsed();
     println!("Get time: {:?}", get_duration);
     println!("Buffer size: {}", buffer.len());
@@ -134,6 +152,7 @@ async fn sort_map(args: Input) -> Output {
     // println!("Partitions: {:?}", indexes.keys());
     let mut keys: Vec<String> = Vec::new();
 
+    let pre_upload_map = get_timestamp_in_milliseconds().unwrap().to_string();
     for (bucket, indexes) in indexes.iter() {
         let a = ChunkedArray::from_vec("partition", indexes.clone());
         let mut partition_df = df_chunk.take(&a).unwrap();
@@ -165,10 +184,15 @@ async fn sort_map(args: Input) -> Output {
         println!("Put time: {:?}", put_duration);
         keys.push(key);
     }
+    let end_fn_map = get_timestamp_in_milliseconds().unwrap().to_string();
 
     Output {
         partition_idx: args.partition_idx,
         reduce_keys: keys,
+        init_fn_map: init_fn_map,
+        post_download_map: post_download_map,
+        pre_upload_map: pre_upload_map,
+        end_fn_map: end_fn_map
     }
 }
 

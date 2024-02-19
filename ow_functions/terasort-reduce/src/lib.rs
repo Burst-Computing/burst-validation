@@ -1,4 +1,5 @@
 use std::{fs::File, io::Cursor, time::Instant};
+use std::time::{ SystemTime, SystemTimeError, UNIX_EPOCH };
 
 use polars::prelude::{
     CsvReader, CsvWriter, DataFrame, QuoteStyle, SerReader, SerWriter, SortOptions,
@@ -15,7 +16,7 @@ extern crate serde_json;
 struct Input {
     bucket: String,
     key: String,
-    obj_size: u32,
+    obj_size: u64,
     sort_column: u32,
     delimiter: char,
     partitions: u32,
@@ -25,8 +26,7 @@ struct Input {
     mpu_key: String,
     mpu_id: String,
     tmp_prefix: String,
-    s3_config: S3Config,
-    rabbitmq_config: RabbitMQConfig,
+    s3_config: S3Config
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -38,20 +38,28 @@ struct S3Config {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct RabbitMQConfig {
-    uri: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Output {
     bucket: String,
     key: String,
     part_number: u32,
     etag: String,
+    init_fn_reduce: String,
+    post_download_reduce: String,
+    pre_upload_reduce: String,
+    end_fn_reduce: String
+}
+
+fn get_timestamp_in_milliseconds() -> Result<u128, SystemTimeError> {
+  let current_system_time = SystemTime::now();
+  let duration_since_epoch = current_system_time.duration_since(UNIX_EPOCH)?;
+  let milliseconds_timestamp = duration_since_epoch.as_millis();
+
+  Ok(milliseconds_timestamp)
 }
 
 async fn sort_reduce(args: Input) -> Output {
     // using abandoned rusoto lib because aws sdk beta sucks and does not work with minio
+    let init_fn_reduce = get_timestamp_in_milliseconds().unwrap().to_string();
     let client = rusoto_core::request::HttpClient::new().unwrap();
     let region = Region::Custom {
         name: args.s3_config.region,
@@ -105,6 +113,8 @@ async fn sort_reduce(args: Input) -> Output {
         agg_df = Some(a);
     }
 
+    let post_download_reduce = get_timestamp_in_milliseconds().unwrap().to_string();
+
     let mut agg_df = agg_df.unwrap();
     let agg_df = agg_df.align_chunks();
     println!("Bucket {} has {} rows", args.partition_idx, agg_df.height());
@@ -128,6 +138,8 @@ async fn sort_reduce(args: Input) -> Output {
     let sort_duration = sort_start_t.elapsed();
     println!("Sort time: {:?}", sort_duration);
 
+    let pre_upload_reduce = get_timestamp_in_milliseconds().unwrap().to_string();
+
     let mut buf = Vec::new();
     let write_start_t = Instant::now();
     CsvWriter::new(&mut buf)
@@ -149,6 +161,8 @@ async fn sort_reduce(args: Input) -> Output {
     println!("{:?}", mpu_input);
     let part_upload_res = s3_client.upload_part(mpu_input).await.unwrap();
 
+    let end_fn_reduce = get_timestamp_in_milliseconds().unwrap().to_string();
+
     let etag = part_upload_res.e_tag.unwrap();
     println!("etag: {}", etag);
     Output {
@@ -156,6 +170,10 @@ async fn sort_reduce(args: Input) -> Output {
         key: args.mpu_key,
         part_number: args.partition_idx,
         etag: etag,
+        init_fn_reduce: init_fn_reduce,
+        post_download_reduce: post_download_reduce,
+        pre_upload_reduce: pre_upload_reduce,
+        end_fn_reduce: end_fn_reduce
     }
 }
 

@@ -33,7 +33,7 @@ struct Input {
     mpu_key: String,
     mpu_id: String,
     tmp_prefix: String,
-    s3_config: S3Config,
+    s3_config: S3Config
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
