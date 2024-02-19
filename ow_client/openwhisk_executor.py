@@ -165,7 +165,7 @@ class OpenwhiskExecutor:
 
     def __invoke_burst_actions(self, action_name, params_list, burst_size,
                                backend, chunk_size, join, debug_mode) -> List[str] | None:
-        burst_url = f"{self.protocol}://{self.host}:{self.port}/api/v1/namespaces/guest/actions/{action_name}?burst=true&timeout=300000"
+        burst_url = f"{self.protocol}://{self.host}:{self.port}/api/v1/namespaces/guest/actions/{action_name}?burst=true"
         if burst_size:
             burst_url += f"&granularity={burst_size}"
         if join:

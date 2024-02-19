@@ -1,4 +1,5 @@
 use std::{collections::HashMap, io::Cursor, time::Instant};
+use std::time::{ SystemTime, SystemTimeError, UNIX_EPOCH };
 
 use burst_communication_middleware::MiddlewareActorHandle;
 use bytes::Bytes;
@@ -50,6 +51,20 @@ struct Output {
     key: String,
     part_number: u32,
     etag: String,
+    init_fn: String,
+    post_download: String,
+    pre_shuffle: String,
+    post_shuffle: String,
+    pre_upload: String,
+    end_fn: String
+}
+
+fn get_timestamp_in_milliseconds() -> Result<u128, SystemTimeError> {
+  let current_system_time = SystemTime::now();
+  let duration_since_epoch = current_system_time.duration_since(UNIX_EPOCH)?;
+  let milliseconds_timestamp = duration_since_epoch.as_millis();
+
+  Ok(milliseconds_timestamp)
 }
 
 async fn get_chunk(s3_client: &S3Client, args: &Input) -> Vec<u8> {
@@ -115,6 +130,7 @@ async fn upload_chunk_result(args: &Input, buf: Vec<u8>) -> String {
 }
 
 fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
+    let init_fn = get_timestamp_in_milliseconds().unwrap().to_string();
     // using abandoned rusoto lib because aws sdk beta sucks and does not work with minio
     let client = rusoto_core::request::HttpClient::new().unwrap();
     let region = Region::Custom {
@@ -134,6 +150,7 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
     let get_t0 = Instant::now();
     let chunk = tokio_runtime.block_on(get_chunk(&s3_client, &args));
     let get_duration = get_t0.elapsed();
+    let post_download = get_timestamp_in_milliseconds().unwrap().to_string();
     println!(
         "[Worker {}] Get time: {:?}",
         burst_middleware.info.worker_id, get_duration
@@ -156,6 +173,7 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
     // Here we calculate using binary search the indexes to which bucket each row should go
     let mut indexes: HashMap<u32, Vec<u32>> = HashMap::new();
     let shuffle_t0 = Instant::now();
+    let pre_shuffle = get_timestamp_in_milliseconds().unwrap().to_string();
     for (idx, value) in df_chunk[args.sort_column as usize].iter().enumerate() {
         // println!("{}", x);
         let res = match value {
@@ -177,7 +195,6 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
             }
         };
     }
-
     for (bucket, idxs) in indexes {
         // Get the rows that belong to this bucket taking the indexes calculated before
         let chunked_array = ChunkedArray::from_vec("partition", idxs);
@@ -237,6 +254,7 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
         };
         agg_df = Some(df);
     }
+    let post_shuffle = get_timestamp_in_milliseconds().unwrap().to_string();
     let shuffle_duration = shuffle_t0.elapsed();
     println!(
         "[Worker {}] Shuffle time: {:?}",
@@ -286,7 +304,7 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
         "[Worker {}] Serialize time: {:?}",
         burst_middleware.info.worker_id, write_duration
     );
-
+    let pre_upload = get_timestamp_in_milliseconds().unwrap().to_string();
     let put_part_t0 = Instant::now();
     let etag = tokio_runtime.block_on(upload_chunk_result(&args, buf));
     let put_part_duration = put_part_t0.elapsed();
@@ -295,12 +313,19 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
         burst_middleware.info.worker_id, put_part_duration
     );
 
+    let end_fn = get_timestamp_in_milliseconds().unwrap().to_string();
     // println!("etag: {}", etag);
     Output {
         bucket: args.bucket,
         key: args.mpu_key,
         part_number: args.partition_idx,
         etag: etag,
+        init_fn: init_fn,
+        post_download: post_download,
+        pre_shuffle: pre_shuffle,
+        post_shuffle: post_shuffle,
+        pre_upload: pre_upload,
+        end_fn: end_fn
     }
 }
 
