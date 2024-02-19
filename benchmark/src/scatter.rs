@@ -7,9 +7,10 @@ use crate::{get_timestamp, Out};
 pub fn worker(burst_middleware: MiddlewareActorHandle, payload: usize) -> Out {
     let id = burst_middleware.info.worker_id;
     info!("worker start: id={}", id);
-    let start = get_timestamp();
 
     let total_size;
+    let start;
+    let end;
 
     // If id 0, sender
     if id == 0 {
@@ -20,20 +21,23 @@ pub fn worker(burst_middleware: MiddlewareActorHandle, payload: usize) -> Out {
         total_size = data.iter().fold(0, |acc, msg| acc + msg.len());
 
         info!("Worker {} - started sending", id);
+        start = get_timestamp();
         burst_middleware.scatter(Some(data)).unwrap();
+        end = get_timestamp();
     // If id != 0, receiver
     } else {
         info!("Worker {} - started receiving", id);
+        start = get_timestamp();
         let msg = burst_middleware.scatter(None).unwrap();
+        end = get_timestamp();
         total_size = msg.data.len();
     }
 
     info!("worker {} end", id);
-    let end = get_timestamp();
 
     let elapsed = end - start;
     let size_mb = total_size as f64 / 1024.0 / 1024.0;
-    let throughput = size_mb as f64 / elapsed as f64;
+    let throughput = size_mb / elapsed;
 
     if id == 0 {
         info!(
