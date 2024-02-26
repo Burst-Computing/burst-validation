@@ -15,7 +15,7 @@ pub fn worker(burst_middleware: MiddlewareActorHandle, payload: usize) -> Out {
     // If id 0, sender
     if id == 0 {
         let data = Bytes::from(vec![b'x'; payload]);
-        let data = (0..burst_middleware.info.burst_size - 1)
+        let data = (0..burst_middleware.info.burst_size)
             .map(|_| data.clone())
             .collect::<Vec<Bytes>>();
         total_size = data.iter().fold(0, |acc, msg| acc + msg.len());
