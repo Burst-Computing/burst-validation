@@ -4,6 +4,8 @@ use log::info;
 
 use crate::{get_timestamp, Out};
 
+const ROOT: u32 = 0;
+
 pub fn worker(burst_middleware: MiddlewareActorHandle, payload: usize) -> Out {
     let id = burst_middleware.info.worker_id;
     info!("worker start: id={}", id);
@@ -18,13 +20,13 @@ pub fn worker(burst_middleware: MiddlewareActorHandle, payload: usize) -> Out {
         total_size = data.len();
         info!("Worker {} - started sending", id);
         start = get_timestamp();
-        burst_middleware.broadcast(Some(data)).unwrap();
+        burst_middleware.broadcast(Some(data), ROOT).unwrap();
         end = get_timestamp();
     // If id != 0, receiver
     } else {
         info!("Worker {} - started receiving", id);
         start = get_timestamp();
-        let msg = burst_middleware.broadcast(None).unwrap();
+        let msg = burst_middleware.broadcast(None, ROOT).unwrap();
         end = get_timestamp();
         total_size = msg.data.len();
     }
