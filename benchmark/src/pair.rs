@@ -1,10 +1,11 @@
-use burst_communication_middleware::MiddlewareActorHandle;
+use burst_communication_middleware::Middleware;
 use bytes::Bytes;
 use log::info;
 
 use crate::{get_timestamp, Out};
 
-pub fn worker(burst_middleware: MiddlewareActorHandle, payload: usize) -> Out {
+pub fn worker(burst_middleware: Middleware, payload: usize) -> Out {
+    let burst_middleware = burst_middleware.get_actor_handle();
     let id = burst_middleware.info.worker_id;
     let burst_size = burst_middleware.info.burst_size;
     info!("worker start: id={}", id);
@@ -19,9 +20,9 @@ pub fn worker(burst_middleware: MiddlewareActorHandle, payload: usize) -> Out {
 
         info!("Worker {} - started receiving from {}", id, from);
         start = get_timestamp();
-        let msg = burst_middleware.recv(from).unwrap();
+        let msg: Bytes = burst_middleware.recv(from).unwrap();
         end = get_timestamp();
-        total_size = msg.data.len();
+        total_size = msg.len();
 
     // If id >= burst_size / 2, sender
     } else {
