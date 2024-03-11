@@ -1,5 +1,5 @@
+use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 use std::{collections::HashMap, io::Cursor, time::Instant};
-use std::time::{ SystemTime, SystemTimeError, UNIX_EPOCH };
 
 use burst_communication_middleware::MiddlewareActorHandle;
 use bytes::Bytes;
@@ -34,7 +34,7 @@ struct Input {
     mpu_key: String,
     mpu_id: String,
     tmp_prefix: String,
-    s3_config: S3Config
+    s3_config: S3Config,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -56,22 +56,24 @@ struct Output {
     pre_shuffle: String,
     post_shuffle: String,
     pre_upload: String,
-    end_fn: String
+    end_fn: String,
 }
 
 fn get_timestamp_in_milliseconds() -> Result<u128, SystemTimeError> {
-  let current_system_time = SystemTime::now();
-  let duration_since_epoch = current_system_time.duration_since(UNIX_EPOCH)?;
-  let milliseconds_timestamp = duration_since_epoch.as_millis();
+    let current_system_time = SystemTime::now();
+    let duration_since_epoch = current_system_time.duration_since(UNIX_EPOCH)?;
+    let milliseconds_timestamp = duration_since_epoch.as_millis();
 
-  Ok(milliseconds_timestamp)
+    Ok(milliseconds_timestamp)
 }
 
 async fn get_chunk(s3_client: &S3Client, args: &Input) -> Vec<u8> {
     // TODO: last chunk is very small than others.
     // Implement +-1 chunking to make it more balanced and avoid failures in MPUs
     let row_size = args.row_size as u64;
-    let chunk_size = ((args.obj_size as f64 / args.partitions as f64) / row_size as f64).ceil() as u64 * row_size;
+    let chunk_size = ((args.obj_size as f64 / args.partitions as f64) / row_size as f64).ceil()
+        as u64
+        * row_size;
 
     let start_byte = args.partition_idx as u64 * chunk_size;
     let end_byte = (args.partition_idx + 1) as u64 * chunk_size;
@@ -101,7 +103,7 @@ async fn get_chunk(s3_client: &S3Client, args: &Input) -> Vec<u8> {
             break;
         }
     }
-    return buffer;
+    buffer
 }
 
 async fn upload_chunk_result(args: &Input, buf: Vec<u8>) -> String {
@@ -325,7 +327,199 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
         pre_shuffle: pre_shuffle,
         post_shuffle: post_shuffle,
         pre_upload: pre_upload,
-        end_fn: end_fn
+        end_fn: end_fn,
+    }
+}
+
+fn sort_burst_all2all(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
+    let init_fn = get_timestamp_in_milliseconds().unwrap().to_string();
+    // using abandoned rusoto lib because aws sdk beta sucks and does not work with minio
+    let client = rusoto_core::request::HttpClient::new().unwrap();
+    let region = Region::Custom {
+        name: args.s3_config.region.clone(),
+        endpoint: args.s3_config.endpoint.clone(),
+    };
+    let creds = rusoto_core::credential::StaticProvider::new_minimal(
+        args.s3_config.aws_access_key_id.clone(),
+        args.s3_config.aws_secret_access_key.clone(),
+    );
+    let s3_client = S3Client::new_with(client, creds, region);
+
+    let tokio_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let get_t0 = Instant::now();
+    let chunk = tokio_runtime.block_on(get_chunk(&s3_client, &args));
+    let get_duration = get_t0.elapsed();
+    let post_download = get_timestamp_in_milliseconds().unwrap().to_string();
+    println!(
+        "[Worker {}] Get time: {:?}",
+        burst_middleware.info.worker_id, get_duration
+    );
+    println!(
+        "[Worker {}] Buffer size: {}",
+        burst_middleware.info.worker_id,
+        chunk.len()
+    );
+
+    // Load the chunk into a DataFrame
+    let cursor = Cursor::new(chunk);
+    let df_chunk: DataFrame = CsvReader::new(cursor)
+        .infer_schema(Some(1))
+        .has_header(false)
+        .with_quote_char(None)
+        .finish()
+        .unwrap();
+
+    // Here we calculate using binary search the indexes to which bucket each row should go
+    let mut indexes: HashMap<u32, Vec<u32>> = HashMap::new();
+    let shuffle_t0 = Instant::now();
+    let pre_shuffle = get_timestamp_in_milliseconds().unwrap().to_string();
+    for (idx, value) in df_chunk[args.sort_column as usize].iter().enumerate() {
+        // println!("{}", x);
+        let res = match value {
+            AnyValue::Utf8(s) => args.segment_bounds.binary_search(&s.to_string()),
+            _ => panic!("Not a string"),
+        };
+        match res {
+            Ok(x) => {
+                indexes
+                    .entry(x as u32)
+                    .or_insert(Vec::new())
+                    .push(idx as u32);
+            }
+            Err(x) => {
+                indexes
+                    .entry(x as u32)
+                    .or_insert(Vec::new())
+                    .push(idx as u32);
+            }
+        };
+    }
+    let mut exchange_vec = vec![Bytes::new(); burst_middleware.info.burst_size as usize];
+    for (bucket, idxs) in indexes {
+        // Get the rows that belong to this bucket taking the indexes calculated before
+        let chunked_array = ChunkedArray::from_vec("partition", idxs);
+        let mut partition_df = df_chunk.take(&chunked_array).unwrap();
+
+        // Serialize the partition to CSV and send it to the corresponding worker
+        let mut buf = Vec::new();
+        let write_start_t = Instant::now();
+        CsvWriter::new(&mut buf)
+            .has_header(false)
+            .with_quote_style(QuoteStyle::Never)
+            .finish(&mut partition_df)
+            .unwrap();
+        let write_duration = write_start_t.elapsed();
+        println!(
+            "[Worker {}] Serialize time: {:?}",
+            burst_middleware.info.worker_id, write_duration
+        );
+
+        println!(
+            "[Worker {}] Has to send partition to worker {}, size = {}",
+            burst_middleware.info.worker_id,
+            bucket,
+            buf.len()
+        );
+        exchange_vec[bucket as usize] = Bytes::from(buf);
+    }
+
+    let t0 = Instant::now();
+    let exchanged_vec = burst_middleware
+        .all_to_all(exchange_vec)
+        .expect("Could not execute all-to-all");
+    let duration = t0.elapsed();
+
+    println!(
+        "[Worker {}] All-to-all time: {:?}",
+        burst_middleware.info.worker_id, duration
+    );
+
+    let mut agg_df = exchanged_vec
+        .into_iter()
+        .map(|x| {
+            let cursor = Cursor::new(x.data);
+            CsvReader::new(cursor)
+                .infer_schema(Some(1))
+                .has_header(false)
+                .with_quote_char(None)
+                .finish()
+                .unwrap()
+        })
+        .fold(DataFrame::empty(), |acc, df| acc.vstack(&df).unwrap());
+    let post_shuffle = get_timestamp_in_milliseconds().unwrap().to_string();
+    let shuffle_duration = shuffle_t0.elapsed();
+    println!(
+        "[Worker {}] Shuffle time: {:?}",
+        burst_middleware.info.worker_id, shuffle_duration
+    );
+
+    let agg_df = agg_df.align_chunks();
+    println!(
+        "[Worker {}] Bucket {} has {} rows",
+        burst_middleware.info.worker_id,
+        args.partition_idx,
+        agg_df.height()
+    );
+
+    // println!("{:?}", agg_df.get_column_names()[0]);
+
+    let sort_options = SortOptions {
+        descending: false,
+        nulls_last: true,
+        multithreaded: false,
+        maintain_order: true,
+    };
+
+    let sort_start_t = Instant::now();
+    let mut agg_df = agg_df
+        .sort_with_options(
+            agg_df.get_column_names()[args.sort_column as usize],
+            sort_options,
+        )
+        .unwrap();
+    let sort_duration = sort_start_t.elapsed();
+    println!(
+        "[Worker {}] Sort time: {:?}",
+        burst_middleware.info.worker_id, sort_duration
+    );
+
+    let mut buf = Vec::new();
+    let write_start_t = Instant::now();
+    CsvWriter::new(&mut buf)
+        .has_header(false)
+        .with_quote_style(QuoteStyle::Never)
+        .finish(&mut agg_df)
+        .unwrap();
+    let write_duration = write_start_t.elapsed();
+    println!(
+        "[Worker {}] Serialize time: {:?}",
+        burst_middleware.info.worker_id, write_duration
+    );
+    let pre_upload = get_timestamp_in_milliseconds().unwrap().to_string();
+    let put_part_t0 = Instant::now();
+    let etag = tokio_runtime.block_on(upload_chunk_result(&args, buf));
+    let put_part_duration = put_part_t0.elapsed();
+    println!(
+        "[Worker {}] Put part time: {:?}",
+        burst_middleware.info.worker_id, put_part_duration
+    );
+
+    let end_fn = get_timestamp_in_milliseconds().unwrap().to_string();
+    // println!("etag: {}", etag);
+    Output {
+        bucket: args.bucket,
+        key: args.mpu_key,
+        part_number: args.partition_idx,
+        etag: etag,
+        init_fn: init_fn,
+        post_download: post_download,
+        pre_shuffle: pre_shuffle,
+        post_shuffle: post_shuffle,
+        pre_upload: pre_upload,
+        end_fn: end_fn,
     }
 }
 
