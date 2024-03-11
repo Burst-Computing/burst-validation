@@ -184,16 +184,10 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
         };
         match res {
             Ok(x) => {
-                indexes
-                    .entry(x as u32)
-                    .or_insert(Vec::new())
-                    .push(idx as u32);
+                indexes.entry(x as u32).or_default().push(idx as u32);
             }
             Err(x) => {
-                indexes
-                    .entry(x as u32)
-                    .or_insert(Vec::new())
-                    .push(idx as u32);
+                indexes.entry(x as u32).or_default().push(idx as u32);
             }
         };
     }
@@ -240,7 +234,7 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
         );
         let cursor = Cursor::new(msg.data);
 
-        let mut df_chunk: DataFrame = CsvReader::new(cursor)
+        let df_chunk: DataFrame = CsvReader::new(cursor)
             .infer_schema(Some(1))
             .has_header(false)
             .with_quote_char(None)
@@ -248,10 +242,7 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
             .unwrap();
 
         let df = match agg_df {
-            Some(ref df) => {
-                let new = df.vstack(&mut df_chunk).unwrap();
-                new
-            }
+            Some(ref df) => df.vstack(&df_chunk).unwrap(),
             None => df_chunk,
         };
         agg_df = Some(df);
@@ -321,13 +312,13 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
         bucket: args.bucket,
         key: args.mpu_key,
         part_number: args.partition_idx,
-        etag: etag,
-        init_fn: init_fn,
-        post_download: post_download,
-        pre_shuffle: pre_shuffle,
-        post_shuffle: post_shuffle,
-        pre_upload: pre_upload,
-        end_fn: end_fn,
+        etag,
+        init_fn,
+        post_download,
+        pre_shuffle,
+        post_shuffle,
+        pre_upload,
+        end_fn,
     }
 }
 
@@ -384,16 +375,10 @@ fn sort_burst_all2all(args: Input, burst_middleware: MiddlewareActorHandle) -> O
         };
         match res {
             Ok(x) => {
-                indexes
-                    .entry(x as u32)
-                    .or_insert(Vec::new())
-                    .push(idx as u32);
+                indexes.entry(x as u32).or_default().push(idx as u32);
             }
             Err(x) => {
-                indexes
-                    .entry(x as u32)
-                    .or_insert(Vec::new())
-                    .push(idx as u32);
+                indexes.entry(x as u32).or_default().push(idx as u32);
             }
         };
     }
@@ -513,13 +498,13 @@ fn sort_burst_all2all(args: Input, burst_middleware: MiddlewareActorHandle) -> O
         bucket: args.bucket,
         key: args.mpu_key,
         part_number: args.partition_idx,
-        etag: etag,
-        init_fn: init_fn,
-        post_download: post_download,
-        pre_shuffle: pre_shuffle,
-        post_shuffle: post_shuffle,
-        pre_upload: pre_upload,
-        end_fn: end_fn,
+        etag,
+        init_fn,
+        post_download,
+        pre_shuffle,
+        post_shuffle,
+        pre_upload,
+        end_fn,
     }
 }
 
@@ -529,6 +514,7 @@ pub fn main(args: Value, burst_middleware: MiddlewareActorHandle) -> Result<Valu
     println!("Starting sort: {:?}", input);
 
     let result = sort_burst(input, burst_middleware);
+    //let result = sort_burst_all2all(input, burst_middleware);
 
     println!("Done");
     println!("{:?}", result);
