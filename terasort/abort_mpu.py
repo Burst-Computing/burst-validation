@@ -1,5 +1,4 @@
 import boto3
-import sys
 
 BUCKET = "terasort"
 
@@ -13,4 +12,3 @@ if __name__ == '__main__':
         for mpu in mpus:
             # print("Deleting: ", mpu['Key'])
             s3_client.abort_multipart_upload(Bucket=BUCKET, Key=mpu['Key'], UploadId=mpu['UploadId'])
-        

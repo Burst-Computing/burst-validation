@@ -3,8 +3,11 @@ import json
 import pprint
 from ow_client.logger import logger
 
-from ow_apps.helpers.parser import add_burst_to_parser, try_or_except, add_openwhisk_to_parser, add_kmeans_to_parser
+from ow_client.parser import add_burst_to_parser, try_or_except, add_openwhisk_to_parser
 from ow_client.openwhisk_executor import OpenwhiskExecutor
+
+def add_kmeans_to_parser(parser):
+    parser.add_argument("--workers", type=int, help="Number of workers to use", required=True)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
