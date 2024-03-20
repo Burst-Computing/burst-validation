@@ -9,9 +9,6 @@ from ow_client.openwhisk_executor import OpenwhiskExecutor
 from ow_apps.terasort_classic.terasort_utils import generate_payload, complete_mpu
 
 
-# PRECONDITION: This use case needs to have stored terasort file in Minio
-
-# Ex. usage: python3 main.py --endpoint http://172.17.0.1:9000 --partitions 2 --bucket terasort --key terasort-250m
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     add_openwhisk_to_parser(parser)

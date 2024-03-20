@@ -1,14 +1,8 @@
-# burst-validation
+# Microbenchmarks
 
-## Description
+This directory contains the microbenchmarks to test the performance of the indirect communication middleware with all the different communication patterns. These microbenchmarks are intended to be deployed directly on different hosts without any virtualization/isolation infrastructure (i.e. on bare metal). 
 
-This repository contains the validation code for the [burst commuinication middleware](https://github.com/CLOUDLAB-URV/burst-communication-middleware).
-
-## Benchmark
-
-The benchmark used for the validation is in the [benchmark]() folder.
-
-### Running the benchmark
+## Running the benchmark
 
 ```bash
 $ cd benchmark
@@ -78,7 +72,7 @@ Options:
           Print help (see a summary with '-h')
 ```
 
-### Example
+## Example
 
 Pair benchmark with 2 workers and 2 groups using RabbitMQ as backend:
 
