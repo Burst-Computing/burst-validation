@@ -10,7 +10,7 @@ pub fn worker(burst_middleware: Middleware, payload: usize) -> Out {
     info!("worker start: id={}", id);
 
     let data = Bytes::from(vec![b'x'; payload]);
-    let data_all = (0..burst_middleware.info.burst_size - 1)
+    let data_all = (0..burst_middleware.info.burst_size)
         .map(|_| data.clone())
         .collect::<Vec<Bytes>>();
 

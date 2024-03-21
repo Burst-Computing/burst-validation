@@ -1,20 +1,7 @@
 import argparse
 
-VALID_BURST_BACKEND_OPTIONS = ["rabbitmq", "redis", "redis_stream", "redis_list", "s3"]
+VALID_BURST_BACKEND_OPTIONS = ["rabbitmq", "redis", "redis-stream", "redis-list", "s3"]
 DEFAULT_DOCKER_IMAGE = "manriurv/rust_burst:1"
-
-
-def add_terasort_to_parser(parser):
-    parser.add_argument("--ts-endpoint", type=str, required=True,
-                        help="Endpoint of the S3 service in which the terasort file is stored")
-    parser.add_argument("--partitions", type=int, required=True, help="Number of partitions to sort the file into")
-    parser.add_argument("--bucket", type=str, required=True, help="Terasort bucket name")
-    parser.add_argument("--key", type=str, required=True, help="Terasort object key")
-
-
-def add_kmeans_to_parser(parser):
-    parser.add_argument("--workers", type=int, help="Number of workers to use", required=True)
-
 
 def add_burst_to_parser(parser):
     parser.add_argument("--granularity", type=int, required=False, help="Granularity of burst workers", default=None)
@@ -23,7 +10,6 @@ def add_burst_to_parser(parser):
                         choices=VALID_BURST_BACKEND_OPTIONS)
     parser.add_argument("--chunk-size", type=int, required=False, help="Chunk size for burst messages (in KB)",
                         default=None)
-
 
 def add_openwhisk_to_parser(parser):
     parser.add_argument("--ow-host", type=str, required=True, help="Openwhisk host")

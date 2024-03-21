@@ -1,10 +1,10 @@
 import argparse
 import pandas as pd
 
-from ow_apps.helpers.parser import add_openwhisk_to_parser, add_terasort_to_parser, add_burst_to_parser, try_or_except
-from ow_apps.helpers.time_helper import get_millis
+from ow_client.parser import add_openwhisk_to_parser, add_burst_to_parser, try_or_except
+from ow_client.time_helper import get_millis
 from ow_client.openwhisk_executor import OpenwhiskExecutor
-from ow_apps.helpers.terasort_helper import generate_payload, complete_mpu
+from terasort_utils import generate_payload, complete_mpu, add_terasort_to_parser
 
 # PRECONDITION: This use case needs to have stored terasort file in Minio
 

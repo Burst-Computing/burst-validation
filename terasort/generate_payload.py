@@ -2,12 +2,10 @@ import logging
 from math import floor
 import random
 import json
-import re
 import argparse
 import boto3
 import pandas as pd
 import numpy as np
-from pprint import pprint
 from io import BytesIO
 
 

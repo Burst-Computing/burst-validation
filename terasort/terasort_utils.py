@@ -1,12 +1,10 @@
 import logging
 from math import floor
 import random
-import json
-import argparse
+import os
 import boto3
 import pandas as pd
 import numpy as np
-from pprint import pprint
 from io import BytesIO
 
 logger = logging.getLogger(__name__)
@@ -21,8 +19,8 @@ DEFAULT_PAYLOAD_FILENAME = "sort_payload"
 DEFAULT_TMP_PREFIX = "tmp/"
 
 AWS_S3_REGION = "us-east-1"
-AWS_ACCESS_KEY_ID = "lab144"
-AWS_SECRET_ACCESS_KEY = "astl1a4b4"
+AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", "lab144")
+AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "astl1a4b4")
 
 
 def generate_payload(endpoint, partitions, bucket, key, sort_column, sort_output_key=None,
@@ -32,7 +30,8 @@ def generate_payload(endpoint, partitions, bucket, key, sort_column, sort_output
         random.seed(seed)
 
     s3_client = boto3.client("s3", endpoint_url=endpoint, aws_access_key_id=AWS_ACCESS_KEY_ID,
-                             aws_secret_access_key=AWS_SECRET_ACCESS_KEY, region_name=AWS_S3_REGION)
+                             aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+                             region_name=AWS_S3_REGION)
 
     obj_size = s3_client.head_object(Bucket=bucket, Key=key)["ContentLength"]
 
@@ -177,5 +176,9 @@ def complete_mpu(endpoint, bucket, key, upload_id, mpu):
                                                  MultipartUpload=mpu)
     # print(result)
 
-
-
+def add_terasort_to_parser(parser):
+    parser.add_argument("--ts-endpoint", type=str, required=True,
+                        help="Endpoint of the S3 service in which the terasort file is stored")
+    parser.add_argument("--partitions", type=int, required=True, help="Number of partitions to sort the file into")
+    parser.add_argument("--bucket", type=str, required=True, help="Terasort bucket name")
+    parser.add_argument("--key", type=str, required=True, help="Terasort object key")
