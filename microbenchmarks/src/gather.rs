@@ -6,7 +6,7 @@ use crate::{get_timestamp, Out};
 
 const ROOT: u32 = 0;
 
-pub fn worker(burst_middleware: Middleware, payload: usize) -> Out {
+pub fn worker(burst_middleware: Middleware<Bytes>, payload: usize) -> Out {
     let burst_middleware = burst_middleware.get_actor_handle();
     let id = burst_middleware.info.worker_id;
     info!("worker start: id={}", id);
