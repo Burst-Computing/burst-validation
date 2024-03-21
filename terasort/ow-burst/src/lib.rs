@@ -1,7 +1,7 @@
 use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 use std::{collections::HashMap, io::Cursor, time::Instant};
 
-use burst_communication_middleware::MiddlewareActorHandle;
+use burst_communication_middleware::Middleware;
 use bytes::Bytes;
 use polars::{
     chunked_array::{ops::SortOptions, ChunkedArray},
@@ -131,7 +131,8 @@ async fn upload_chunk_result(args: &Input, buf: Vec<u8>) -> String {
     part_upload_res.e_tag.unwrap()
 }
 
-fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
+fn sort_burst(args: Input, burst_middleware: Middleware<Bytes>) -> Output {
+    let burst_middleware = burst_middleware.get_actor_handle();
     let init_fn = get_timestamp_in_milliseconds().unwrap().to_string();
     // using abandoned rusoto lib because aws sdk beta sucks and does not work with minio
     let client = rusoto_core::request::HttpClient::new().unwrap();
@@ -230,9 +231,9 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
         let msg = burst_middleware.recv(i).unwrap();
         println!(
             "[Worker {}] Received partition {} from worker {}",
-            burst_middleware.info.worker_id, i, msg.sender_id
+            burst_middleware.info.worker_id, i, i
         );
-        let cursor = Cursor::new(msg.data);
+        let cursor = Cursor::new(msg);
 
         let df_chunk: DataFrame = CsvReader::new(cursor)
             .infer_schema(Some(1))
@@ -322,7 +323,8 @@ fn sort_burst(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
     }
 }
 
-fn sort_burst_all2all(args: Input, burst_middleware: MiddlewareActorHandle) -> Output {
+fn sort_burst_all2all(args: Input, burst_middleware: Middleware<Bytes>) -> Output {
+    let burst_middleware = burst_middleware.get_actor_handle();
     let init_fn = get_timestamp_in_milliseconds().unwrap().to_string();
     // using abandoned rusoto lib because aws sdk beta sucks and does not work with minio
     let client = rusoto_core::request::HttpClient::new().unwrap();
@@ -425,7 +427,7 @@ fn sort_burst_all2all(args: Input, burst_middleware: MiddlewareActorHandle) -> O
     let mut agg_df = exchanged_vec
         .into_iter()
         .map(|x| {
-            let cursor = Cursor::new(x.data);
+            let cursor = Cursor::new(x);
             CsvReader::new(cursor)
                 .infer_schema(Some(1))
                 .has_header(false)
@@ -509,7 +511,7 @@ fn sort_burst_all2all(args: Input, burst_middleware: MiddlewareActorHandle) -> O
 }
 
 // ow_main would be the entry point of an actual open whisk burst worker
-pub fn main(args: Value, burst_middleware: MiddlewareActorHandle) -> Result<Value, Error> {
+pub fn main(args: Value, burst_middleware: Middleware<Bytes>) -> Result<Value, Error> {
     let input: Input = serde_json::from_value(args)?;
     println!("Starting sort: {:?}", input);
 
