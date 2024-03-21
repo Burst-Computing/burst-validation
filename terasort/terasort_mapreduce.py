@@ -35,6 +35,7 @@ if __name__ == "__main__":
 
     host_submit_map = get_millis()
     dt_map = executor.map("terasort-map", params,
+                          file="terasort-map.zip",
                           memory=args.runtime_memory if args.runtime_memory else 256,
                           custom_image=args.custom_image, is_zip=True)
 
@@ -50,6 +51,7 @@ if __name__ == "__main__":
 
     host_submit_reduce = get_millis()
     dt_reduce = executor.map("terasort-reduce", params,
+                             file="terasort-reduce.zip",
                              memory=args.runtime_memory if args.runtime_memory else 256,
                              custom_image=args.custom_image, is_zip=True)
 
