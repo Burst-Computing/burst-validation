@@ -23,6 +23,7 @@ if __name__ == "__main__":
     host_submit = get_millis()
     dt = executor.burst("terasort-burst",
                         params,
+                        file="terasort-burst.zip",
                         memory=args.runtime_memory if args.runtime_memory else 4096,
                         custom_image=args.custom_image,
                         debug_mode=args.debug,
