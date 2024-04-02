@@ -176,7 +176,6 @@ fn sort_burst(args: Input, burst_middleware: Middleware<Bytes>) -> Output {
     // Here we calculate using binary search the indexes to which bucket each row should go
     let mut indexes: HashMap<u32, Vec<u32>> = HashMap::new();
     let shuffle_t0 = Instant::now();
-    let pre_shuffle = get_timestamp_in_milliseconds().unwrap().to_string();
     for (idx, value) in df_chunk[args.sort_column as usize].iter().enumerate() {
         // println!("{}", x);
         let res = match value {
@@ -192,6 +191,7 @@ fn sort_burst(args: Input, burst_middleware: Middleware<Bytes>) -> Output {
             }
         };
     }
+    let pre_shuffle = get_timestamp_in_milliseconds().unwrap().to_string();
     for (bucket, idxs) in indexes {
         // Get the rows that belong to this bucket taking the indexes calculated before
         let chunked_array = ChunkedArray::from_vec("partition", idxs);
@@ -368,7 +368,6 @@ fn sort_burst_all2all(args: Input, burst_middleware: Middleware<Bytes>) -> Outpu
     // Here we calculate using binary search the indexes to which bucket each row should go
     let mut indexes: HashMap<u32, Vec<u32>> = HashMap::new();
     let shuffle_t0 = Instant::now();
-    let pre_shuffle = get_timestamp_in_milliseconds().unwrap().to_string();
     for (idx, value) in df_chunk[args.sort_column as usize].iter().enumerate() {
         // println!("{}", x);
         let res = match value {
@@ -385,6 +384,7 @@ fn sort_burst_all2all(args: Input, burst_middleware: Middleware<Bytes>) -> Outpu
         };
     }
     let mut exchange_vec = vec![Bytes::new(); burst_middleware.info.burst_size as usize];
+    let pre_shuffle = get_timestamp_in_milliseconds().unwrap().to_string();
     for (bucket, idxs) in indexes {
         // Get the rows that belong to this bucket taking the indexes calculated before
         let chunked_array = ChunkedArray::from_vec("partition", idxs);
