@@ -515,8 +515,8 @@ pub fn main(args: Value, burst_middleware: Middleware<Bytes>) -> Result<Value, E
     let input: Input = serde_json::from_value(args)?;
     println!("Starting sort: {:?}", input);
 
-    let result = sort_burst(input, burst_middleware);
-    //let result = sort_burst_all2all(input, burst_middleware);
+    //let result = sort_burst(input, burst_middleware);
+    let result = sort_burst_all2all(input, burst_middleware);
 
     println!("Done");
     println!("{:?}", result);
