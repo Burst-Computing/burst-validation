@@ -21,6 +21,7 @@ DEFAULT_TMP_PREFIX = "tmp/"
 AWS_S3_REGION = "us-east-1"
 AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", "lab144")
 AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "astl1a4b4")
+AWS_SESSION_TOKEN = os.environ.get("AWS_SESSION_TOKEN", None)
 
 
 def generate_payload(endpoint, partitions, bucket, key, sort_column, sort_output_key=None,
@@ -30,7 +31,7 @@ def generate_payload(endpoint, partitions, bucket, key, sort_column, sort_output
         random.seed(seed)
 
     s3_client = boto3.client("s3", endpoint_url=endpoint, aws_access_key_id=AWS_ACCESS_KEY_ID,
-                             aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+                             aws_secret_access_key=AWS_SECRET_ACCESS_KEY, aws_session_token=AWS_SESSION_TOKEN,
                              region_name=AWS_S3_REGION)
 
     obj_size = s3_client.head_object(Bucket=bucket, Key=key)["ContentLength"]
