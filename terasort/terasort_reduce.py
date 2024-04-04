@@ -35,7 +35,7 @@ if __name__ == "__main__":
                              custom_image=args.custom_image, is_zip=True)
     end_time = get_millis()
     stats = pd.concat([stats,
-                       pd.DataFrame({"fn_id": i["partition_idx"],
+                       pd.DataFrame({"fn_id": i["part_number"],
                                      "host_submit_reduce": host_submit_reduce,
                                      "init_fn_reduce": i["init_fn_reduce"],
                                      "post_download_reduce": i["post_download_reduce"],
