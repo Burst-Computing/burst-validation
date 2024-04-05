@@ -1,30 +1,33 @@
-use core::panic;
+use std::collections::{HashMap, HashSet};
 
-use burst_communication_middleware::BurstMiddleware;
-use serde::{Deserialize, Serialize};
+use aws_config::Region;
+use aws_credential_types::Credentials;
+use aws_sdk_s3::Client as S3Client;
+use burst_communication_middleware::{Middleware, MiddlewareActorHandle};
+use bytes::Bytes;
+use serde_derive::{Deserialize, Serialize};
 use serde_json::{Error, Value};
-use sprs::{vec, CsMat, CsVec};
+use tokio::io::AsyncBufReadExt;
 
-const ERR: f64 = 0.00001;
-const DAMPING: f64 = 0.85;
-const INIT_PAGE_RANK: f64 = 0.25;
-
-const MASTER: i32 = 0;
+const ROOT_WORKER: u32 = 0;
+const MAX_ITER: u32 = 100;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Input {
-    bucket: String,
-    key: String,
-    nodes: u32,
-    s3_config: S3Config,
+    input_data: S3InputParams,
+    error: f64,
+    num_nodes: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct S3Config {
+struct S3InputParams {
+    bucket: String,
+    key: String,
     region: String,
-    endpoint: String,
+    endpoint: Option<String>,
     aws_access_key_id: String,
     aws_secret_access_key: String,
+    aws_session_token: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -33,63 +36,260 @@ struct Output {
     key: String,
 }
 
-// Example graph
-// 0 -> 1, 3
-// 1 -> 2, 4
-// 2 -> 3
-// 3 -> 4
-// 4 -> 0, 1, 2
+#[derive(Debug, Clone)]
+pub struct PagerankMessage(Vec<f64>);
 
-fn get_adjacency_matrix(worker_id: u32, init_value: f64) -> (Vec<i32>, Vec<i32>, Vec<f64>) {
-    match worker_id {
-        0 => (vec![0, 0, 1, 1], vec![1, 3, 2, 4], vec![init_value; 4]),
-        1 => (vec![2, 3], vec![3, 4], vec![init_value; 2]),
-        2 => (vec![4, 4, 4], vec![0, 1, 2], vec![init_value; 3]),
-        _ => panic!("cowaboomer"),
+impl From<Bytes> for PagerankMessage {
+    fn from(bytes: Bytes) -> Self {
+        let mut vecu8 = bytes.to_vec();
+        let vecf64 = unsafe {
+            let ratio = std::mem::size_of::<f64>() / std::mem::size_of::<u8>();
+            let length = vecu8.len() / ratio;
+            let capacity = vecu8.capacity() / ratio;
+            let ptr = vecu8.as_mut_ptr() as *mut f64;
+
+            // Don't run the destructor for vec32
+            std::mem::forget(vecu8);
+
+            // Construct new Vec
+            Vec::from_raw_parts(ptr, length, capacity)
+        };
+        PagerankMessage(vecf64)
     }
 }
 
-fn pagerank(params: Input, burst_middleware: &BurstMiddleware) -> Output {
-    let rank = burst_middleware.info().worker_id;
-    let num_pages = params.nodes;
-    // Initialize vectors
-    let page_ranks = vec![INIT_PAGE_RANK; params.nodes as usize];
-    let damping = vec![DAMPING; params.nodes as usize];
-    // page_values contains the non-zero values (page weight) of the page graph adjacency matrix assigned to this worker
-    // row_indexes and col_indexes are the row and column indexes of the non-zero values
-    let (row_indexes, col_indexes, page_values) = get_adjacency_matrix(rank, 1.0);
-    let mut norm = 0.0;
-    let mut sum = vec![0.0; params.nodes as usize];
+impl From<PagerankMessage> for Bytes {
+    fn from(mut val: PagerankMessage) -> Self {
+        let vec8 = unsafe {
+            let ratio = std::mem::size_of::<f64>() / std::mem::size_of::<u8>();
+            let length = val.0.len() * ratio;
+            let capacity = val.0.capacity() * ratio;
+            let ptr = val.0.as_mut_ptr() as *mut u8;
 
-    while norm < ERR {
-        norm = 0.0;
-        for i in 0..sum.len() {
-            sum[i] = 0.0;
-        }
+            // Don't run the destructor for vec32
+            std::mem::forget(val.0);
 
-        for page in 0..num_pages {
-            for col in 0..2 {}
+            // Construct new Vec
+            Vec::from_raw_parts(ptr, length, capacity)
+        };
+        Bytes::from(vec8)
+    }
+}
+
+async fn get_adjacency_matrix(
+    params: &Input,
+    s3_client: &S3Client,
+) -> (HashMap<u32, HashSet<u32>>, (u32, u32)) {
+    let buf_read = s3_client
+        .get_object()
+        .bucket(params.input_data.bucket.clone())
+        .key(params.input_data.key.clone())
+        .send()
+        .await
+        .unwrap()
+        .body
+        .into_async_read();
+
+    let mut lines = buf_read.lines();
+
+    let mut edges: HashMap<u32, HashSet<u32>> = HashMap::new();
+    let mut min_node: u32 = u32::MAX;
+    let mut max_node: u32 = 0;
+
+    while let Some(line) = lines.next_line().await.unwrap() {
+        let parts: Vec<&str> = line.split('\t').collect();
+        let node = parts[0].parse::<u32>().unwrap();
+
+        let edge = parts[1].parse::<u32>().unwrap();
+
+        if let Some(edges_set) = edges.get_mut(&node) {
+            edges_set.insert(edge);
+        } else {
+            if node < min_node {
+                min_node = node;
+            }
+            if node > max_node {
+                max_node = node;
+            }
+            let mut edges_set = HashSet::new();
+            edges_set.insert(edge);
+            edges.insert(node, edges_set);
         }
     }
 
-    unimplemented!();
+    println!("{:?}", edges);
+
+    (edges, (min_node, max_node + 1))
+}
+
+fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMessage>) -> Output {
+    let worker = burst_middleware.info.worker_id;
+
+    // create s3 client
+    let credentials_provider = Credentials::from_keys(
+        params.input_data.aws_access_key_id.clone(),
+        params.input_data.aws_secret_access_key.clone(),
+        params.input_data.aws_session_token.clone(),
+    );
+
+    let config = match params.input_data.endpoint.clone() {
+        Some(endpoint) => {
+            aws_sdk_s3::config::Builder::new()
+                .endpoint_url(endpoint)
+                .credentials_provider(credentials_provider)
+                .region(Region::new(params.input_data.region.clone()))
+                .force_path_style(true) // apply bucketname as path param instead of pre-domain
+                .build()
+        }
+        None => aws_sdk_s3::config::Builder::new()
+            .credentials_provider(credentials_provider)
+            .region(Region::new(params.input_data.region.clone()))
+            .build(),
+    };
+    let s3_client = S3Client::from_conf(config);
+
+    // create tokio runtime for async s3 requests
+    let tokio_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    // page_ranks contains the page rank of all nodes, where each index corresponds to the node id
+    let init_pagerank = 1.0 / params.num_nodes as f64;
+    let mut page_ranks = vec![init_pagerank; params.num_nodes as usize];
+    // graph contains the adjacency matrix of the nodes assigned to this worker
+    // we use CSR (compressed rows), since we will iterate over the columns for each row
+    let (graph, nodes_range) = tokio_runtime.block_on(get_adjacency_matrix(&params, &s3_client));
+
+    println!(
+        "[Worker {}] Graph size: {:?} (range: {:?})",
+        worker,
+        graph.len(),
+        nodes_range
+    );
+
+    let mut norm = f64::MAX;
+    let mut iter = 0;
+    let mut sum = vec![0.0; params.num_nodes as usize];
+
+    // calculate the number of outgoing links for each page of this worker
+    let mut out_links = HashMap::new();
+    for i in nodes_range.0..nodes_range.1 {
+        let mut count = 0;
+        for j in 0..params.num_nodes {
+            if let Some(edges) = graph.get(&i) {
+                if edges.contains(&j) {
+                    count += 1;
+                }
+            }
+        }
+        out_links.insert(i, count);
+    }
+    println!("[Worker {}] Outgoing links: {:?}", worker, out_links);
+
+    while (norm >= params.error) && (iter < MAX_ITER) {
+        // while iter < MAX_ITER {
+        let pr_msg = if burst_middleware.info.worker_id == ROOT_WORKER {
+            println!("[Worker {}] Broadcast page rank weights", worker);
+            burst_middleware
+                .broadcast(Some(PagerankMessage(page_ranks.clone())), ROOT_WORKER)
+                .unwrap()
+        } else {
+            println!("[Worker {}] Waiting for updated page rank weights", worker);
+            burst_middleware.broadcast(None, ROOT_WORKER).unwrap()
+        };
+        page_ranks = pr_msg.0;
+
+        println!("[Worker {}] Page ranks: {:?}", worker, page_ranks);
+
+        for i in nodes_range.0..nodes_range.1 {
+            for j in 0..params.num_nodes {
+                if let Some(edges) = graph.get(&i) {
+                    if edges.contains(&j) {
+                        let n_out_links = *out_links.get(&i).unwrap_or(&1) as f64;
+                        sum[j as usize] += page_ranks[i as usize] / n_out_links;
+                    }
+                }
+            }
+        }
+
+        println!("[Worker {}] Sums: {:?}", worker, sum);
+
+        let sum_msg = burst_middleware
+            .reduce(PagerankMessage(sum.clone()), |vec1, vec2| {
+                let reduced_sum = vec1
+                    .0
+                    .iter()
+                    .zip(vec2.0.iter())
+                    .map(|(a, b)| a + b)
+                    .collect();
+                PagerankMessage(reduced_sum)
+            })
+            .unwrap();
+
+        let new_norm = if let Some(x) = sum_msg {
+            println!("[Worker {}] ROOT --> Received reduced sum", worker);
+            println!("Reduced sum: {:?}", x.0);
+
+            // Root worker has the reduced sum of all ranks
+            let new_page_ranks = x.0;
+            // Calculate the difference between the new and old page ranks, sum the squares and take the square root
+            norm = new_page_ranks
+                .iter()
+                .zip(page_ranks.iter())
+                .map(|(a, b)| a - b)
+                .map(|x| x * x)
+                .sum::<f64>()
+                .sqrt();
+
+            page_ranks = new_page_ranks;
+            println!("[Worker {}] ROOT --> New error is {}", worker, norm);
+            println!("Page Ranks: {:?}", page_ranks);
+            Some(PagerankMessage(vec![norm]))
+        } else {
+            None
+        };
+
+        norm = burst_middleware
+            .broadcast(new_norm, ROOT_WORKER)
+            .unwrap()
+            .0
+            .pop()
+            .unwrap();
+
+        iter += 1;
+
+        println!(
+            "[Worker {}] *** Completed iteration {}, err is {} ***",
+            worker, iter, norm
+        );
+
+        // Reset sum vector for the next iteration
+        for val in &mut sum {
+            *val = 0.0;
+        }
+    }
+
+    Output {
+        bucket: params.input_data.bucket.clone(),
+        key: params.input_data.key.clone(),
+    }
 }
 
 // ow_main would be the entry point of an actual open whisk burst worker
-pub fn main(args: Value, burst_middleware: BurstMiddleware) -> Result<Value, Error> {
+pub fn main(args: Value, burst_middleware: Middleware<PagerankMessage>) -> Result<Value, Error> {
     let input: Input = serde_json::from_value(args)?;
+    let burst_middleware = burst_middleware.get_actor_handle();
     println!(
         "[Worker {}] Starting pagerank: {:?}",
-        burst_middleware.info().worker_id,
-        input
+        burst_middleware.info.worker_id, input
     );
 
     let result = pagerank(input, &burst_middleware);
 
     println!(
         "[Worker {}] Done: {:?}",
-        burst_middleware.info().worker_id,
-        result
+        burst_middleware.info.worker_id, result
     );
     serde_json::to_value(result)
 }

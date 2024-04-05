@@ -1,0 +1,50 @@
+[
+    {
+        "input_data": {
+            "bucket": "pagerank",
+            "key": "test/edges/part-00000",
+            "endpoint": "http://localhost:9000",
+            "region": "",
+            "aws_access_key_id": "minioadmin",
+            "aws_secret_access_key": "minioadmin"
+        },
+        "num_nodes": 5,
+        "error": 0.00005
+    },
+    {
+        "input_data": {
+            "bucket": "pagerank",
+            "key": "test/edges/part-00001",
+            "endpoint": "http://localhost:9000",
+            "region": "",
+            "aws_access_key_id": "minioadmin",
+            "aws_secret_access_key": "minioadmin"
+        },
+        "num_nodes": 5,
+        "error": 0.00005
+    },
+    {
+        "input_data": {
+            "bucket": "pagerank",
+            "key": "test/edges/part-00002",
+            "endpoint": "http://localhost:9000",
+            "region": "",
+            "aws_access_key_id": "minioadmin",
+            "aws_secret_access_key": "minioadmin"
+        },
+        "num_nodes": 5,
+        "error": 0.00005
+    },
+    {
+        "input_data": {
+            "bucket": "pagerank",
+            "key": "test/edges/part-00003",
+            "endpoint": "http://localhost:9000",
+            "region": "",
+            "aws_access_key_id": "minioadmin",
+            "aws_secret_access_key": "minioadmin"
+        },
+        "num_nodes": 5,
+        "error": 0.00005
+    }
+]
