@@ -29,7 +29,7 @@ class OpenwhiskExecutor:
         logger.setLevel(logging.DEBUG if debug else logging.INFO)
         logger.info("OpenwhiskExecutor initialized")
 
-    def burst(self, action_name, params_list, is_zip=False, memory=256, debug_mode=False, custom_image=None,
+    def burst(self, action_name, params_list, file, is_zip=False, memory=256, debug_mode=False, custom_image=None,
               backend="rabbitmq",
               burst_size=None, chunk_size=None, join=False) -> ResultDataset:
         """
@@ -48,7 +48,7 @@ class OpenwhiskExecutor:
         :return: Dataset with the results and some metrics of the executions
         """
         dataset = ResultDataset()
-        self.__create_action(action_name, is_zip, memory, custom_image)
+        self.__create_action(action_name, file, is_zip, memory, custom_image)
         activation_ids = self.__invoke_burst_actions(action_name, params_list, burst_size, backend, chunk_size, join,
                                                      debug_mode)
         for index, activation_id in enumerate(activation_ids):
@@ -57,7 +57,7 @@ class OpenwhiskExecutor:
         self.__wait_for_completion(dataset)
         return dataset
 
-    def map(self, action_name, params_list, is_zip=False, memory=256, custom_image=None) -> ResultDataset:
+    def map(self, action_name, params_list, file, is_zip=False, memory=256, custom_image=None) -> ResultDataset:
         """
         Function to invoke a map (classic) of actions
         :param action_name: the name of the action to invoke. Action must be located into functions folder.
@@ -69,14 +69,14 @@ class OpenwhiskExecutor:
         :return: Dataset with the results and some metrics of the executions
         """
         dataset = ResultDataset()
-        self.__create_action(action_name, is_zip, memory, custom_image)
+        self.__create_action(action_name, file, is_zip, memory, custom_image)
         for index, input in enumerate(params_list):
             activation_id = self.__invoke_single_action(action_name, input)
             dataset.add_invocation(index, activation_id, time.time(), is_burst=False)
         self.__wait_for_completion(dataset)
         return dataset
 
-    def __create_action(self, action_name, is_zip, memory, custom_image):
+    def __create_action(self, action_name, file, is_zip, memory, custom_image):
         action_data = {
             "exec": {
                 "main": "main",
@@ -90,12 +90,11 @@ class OpenwhiskExecutor:
             }
         }
         if is_zip:
-            code = open(f"ow_functions/{action_name}.zip", "rb").read()
+            code = open(file, "rb").read()
             code = (base64.b64encode(code)).decode('ascii')
             binary = True
         else:
-            action_file = f"ow_functions/{action_name}.rs"
-            with open(action_file, "r") as rust_file:
+            with open(file, "r") as rust_file:
                 rust_code = rust_file.read()
             code = rust_code.strip()
             binary = False

@@ -1,12 +1,11 @@
 import argparse
-import time
 
 import pandas as pd
 
-from ow_apps.helpers.parser import add_openwhisk_to_parser, add_terasort_to_parser, try_or_except
-from ow_apps.helpers.time_helper import get_millis
+from ow_client.parser import add_openwhisk_to_parser, try_or_except
+from ow_client.time_helper import get_millis
 from ow_client.openwhisk_executor import OpenwhiskExecutor
-from ow_apps.terasort_classic.terasort_utils import generate_payload, complete_mpu
+from terasort_utils import generate_payload, complete_mpu, add_terasort_to_parser
 
 
 if __name__ == "__main__":
@@ -36,6 +35,7 @@ if __name__ == "__main__":
 
     host_submit_map = get_millis()
     dt_map = executor.map("terasort-map", params,
+                          file="terasort/terasort-map.zip",
                           memory=args.runtime_memory if args.runtime_memory else 256,
                           custom_image=args.custom_image, is_zip=True)
 
@@ -51,6 +51,7 @@ if __name__ == "__main__":
 
     host_submit_reduce = get_millis()
     dt_reduce = executor.map("terasort-reduce", params,
+                             file="terasort/terasort-reduce.zip",
                              memory=args.runtime_memory if args.runtime_memory else 256,
                              custom_image=args.custom_image, is_zip=True)
 

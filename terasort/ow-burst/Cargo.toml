@@ -6,7 +6,7 @@ edition = "2021"
 resolver = "2"
 
 [dependencies]
-burst-communication-middleware = { path = "../../burst-communication-middleware" }
+burst-communication-middleware = { path = "../burst-communication-middleware", features = ["redis_list"] }
 log = "0.4.20"
 # aws-config = { git = "https://github.com/awslabs/aws-sdk-rust", branch = "next" }
 # aws-sdk-s3 = { git = "https://github.com/awslabs/aws-sdk-rust", branch = "next" }
