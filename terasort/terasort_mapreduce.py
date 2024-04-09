@@ -23,9 +23,9 @@ if __name__ == "__main__":
     if args.max_concurrency_reduce is None:
         args.max_concurrency_reduce = S3_MAX_GET_RATE // args.partitions - 1
 
-    # Add map and reduce max concurrency
-    params_map = [dict(params[i], max_concurrency=args.max_concurrency_map) for i in range(args.partitions)]
-    params_reduce = [dict(params[i], max_concurrency=args.max_concurrency_reduce) for i in range(args.partitions)]
+    # Add map and reduce max concurrency inside s3_config
+    params_map = [dict(params[i], s3_config={**params[i].get('s3_config', {}), 'max_concurrency': args.max_concurrency_map}) for i in range(args.partitions)]
+    params_reduce = [dict(params[i], s3_config={**params[i].get('s3_config', {}), 'max_concurrency': args.max_concurrency_reduce}) for i in range(args.partitions)]
 
     executor = OpenwhiskExecutor(args.ow_host, args.ow_port, args.debug)
 
