@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 use std::{io::Cursor, time::Instant};
 
+use aws_config::retry::RetryConfig;
 use aws_config::Region;
 use aws_credential_types::Credentials;
 use aws_sdk_s3::Client as S3Client;
@@ -81,11 +82,13 @@ async fn sort_reduce(args: Input) -> Output {
                 .credentials_provider(credentials_provider)
                 .region(Region::new(args.s3_config.region.clone()))
                 .force_path_style(true) // apply bucketname as path param instead of pre-domain
+                .retry_config(RetryConfig::adaptive())
                 .build()
         }
         None => aws_sdk_s3::config::Builder::new()
             .credentials_provider(credentials_provider)
             .region(Region::new(args.s3_config.region.clone()))
+            .retry_config(RetryConfig::adaptive())
             .build(),
     };
     let s3_client = S3Client::from_conf(config);
