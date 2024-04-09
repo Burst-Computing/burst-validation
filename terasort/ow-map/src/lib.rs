@@ -228,37 +228,6 @@ async fn sort_map(args: Input) -> Output {
         }
     }
 
-    // for (bucket, indexes) in indexes.iter() {
-    //     let a = ChunkedArray::from_vec("partition", indexes.clone());
-    //     let mut partition_df = df_chunk.take(&a).unwrap();
-
-    //     let mut buf = Vec::with_capacity(partition_df.height() * args.row_size as usize);
-    //     let write_start_t = Instant::now();
-    //     CsvWriter::new(&mut buf)
-    //         .has_header(false)
-    //         .with_quote_style(QuoteStyle::Never)
-    //         .finish(&mut partition_df)
-    //         .unwrap();
-    //     let write_duration = write_start_t.elapsed();
-    //     // println!("Serialize time: {:?}", write_duration);
-
-    //     let key = format!(
-    //         "{}{}/{}.part{}",
-    //         args.tmp_prefix, bucket, args.key, args.partition_idx
-    //     );
-    //     println!("Going to upload partition {}, size = {}", key, buf.len());
-    //     let put_object_request = rusoto_s3::PutObjectRequest {
-    //         bucket: args.bucket.clone(),
-    //         key: key.clone(),
-    //         body: Some(buf.into()),
-    //         ..Default::default()
-    //     };
-    //     let put_t0 = Instant::now();
-    //     s3_client.put_object(put_object_request).await.unwrap();
-    //     let put_duration = put_t0.elapsed();
-    //     println!("Put time: {:?}", put_duration);
-    //     keys.push(key);
-    // }
     let end_fn_map = get_timestamp_in_milliseconds().unwrap().to_string();
 
     Output {

@@ -155,46 +155,6 @@ async fn sort_reduce(args: Input) -> Output {
         agg_df = Some(a);
     }
 
-    // for i in 0..args.partitions {
-    //     let key = format!(
-    //         "{}{}/{}.part{}",
-    //         args.tmp_prefix, args.partition_idx, args.key, i
-    //     );
-    //     let get_req = GetObjectRequest {
-    //         bucket: args.bucket.clone(),
-    //         key: key,
-    //         ..Default::default()
-    //     };
-    //     println!("{:?}", get_req);
-    //     let get_res = s3_client.get_object(get_req).await.unwrap();
-
-    //     let mut buffer: Vec<u8> = Vec::with_capacity(get_res.content_length.unwrap() as usize);
-    //     let mut reader = get_res.body.unwrap().into_async_read();
-    //     while let Ok(sz) = reader.read_buf(&mut buffer).await {
-    //         if sz == 0 {
-    //             break;
-    //         }
-    //     }
-
-    //     let cursor = Cursor::new(buffer);
-
-    //     let mut df_chunk: DataFrame = CsvReader::new(cursor)
-    //         .infer_schema(Some(1))
-    //         .has_header(false)
-    //         .with_quote_char(None)
-    //         .finish()
-    //         .unwrap();
-
-    //     let a = match agg_df {
-    //         Some(ref df) => {
-    //             let new = df.vstack(&mut df_chunk).unwrap();
-    //             new
-    //         }
-    //         None => df_chunk,
-    //     };
-    //     agg_df = Some(a);
-    // }
-
     let post_download_reduce = get_timestamp_in_milliseconds().unwrap().to_string();
 
     let mut agg_df = agg_df.unwrap();
