@@ -5,7 +5,7 @@ import pandas as pd
 from ow_client.parser import add_openwhisk_to_parser, try_or_except
 from ow_client.time_helper import get_millis
 from ow_client.openwhisk_executor import OpenwhiskExecutor
-from terasort_utils import generate_payload, complete_mpu, add_terasort_to_parser
+from terasort_utils import S3_MAX_GET_RATE, S3_MAX_PUT_RATE, generate_payload, complete_mpu, add_terasort_to_parser
 
 
 if __name__ == "__main__":
@@ -16,6 +16,16 @@ if __name__ == "__main__":
 
     params = generate_payload(endpoint=args.ts_endpoint, partitions=args.partitions, bucket=args.bucket, key=args.key,
                               sort_column=0)
+
+    # Calculate max concurrency
+    if args.max_concurrency_map is None:
+        args.max_concurrency_map = S3_MAX_PUT_RATE // args.partitions - 1
+    if args.max_concurrency_reduce is None:
+        args.max_concurrency_reduce = S3_MAX_GET_RATE // args.partitions - 1
+
+    # Add map and reduce max concurrency
+    params_map = [dict(params[i], max_concurrency=args.max_concurrency_map) for i in range(args.partitions)]
+    params_reduce = [dict(params[i], max_concurrency=args.max_concurrency_reduce) for i in range(args.partitions)]
 
     executor = OpenwhiskExecutor(args.ow_host, args.ow_port, args.debug)
 
@@ -34,7 +44,7 @@ if __name__ == "__main__":
                                   "finished"])
 
     host_submit_map = get_millis()
-    dt_map = executor.map("terasort-map", params,
+    dt_map = executor.map("terasort-map", params_map,
                           file="terasort/terasort-map.zip",
                           memory=args.runtime_memory if args.runtime_memory else 256,
                           custom_image=args.custom_image, is_zip=True)
@@ -50,7 +60,7 @@ if __name__ == "__main__":
                        ])
 
     host_submit_reduce = get_millis()
-    dt_reduce = executor.map("terasort-reduce", params,
+    dt_reduce = executor.map("terasort-reduce", params_reduce,
                              file="terasort/terasort-reduce.zip",
                              memory=args.runtime_memory if args.runtime_memory else 256,
                              custom_image=args.custom_image, is_zip=True)

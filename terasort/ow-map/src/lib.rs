@@ -17,8 +17,6 @@ use tokio::sync::Semaphore;
 
 extern crate serde_json;
 
-const DEFAULT_CONCURRENCY_LIMIT: usize = 1_000;
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Input {
     bucket: String,
@@ -43,6 +41,7 @@ struct S3Config {
     aws_access_key_id: String,
     aws_secret_access_key: String,
     aws_session_token: Option<String>,
+    max_concurrency: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -167,7 +166,7 @@ async fn sort_map(args: Input) -> Output {
     let mut keys: Vec<String> = Vec::with_capacity(indexes.len());
     let pre_upload_map = get_timestamp_in_milliseconds().unwrap().to_string();
 
-    let semaphore = Arc::new(Semaphore::new(DEFAULT_CONCURRENCY_LIMIT));
+    let semaphore = Arc::new(Semaphore::new(args.s3_config.max_concurrency));
 
     let mut requests = indexes
         .into_iter()

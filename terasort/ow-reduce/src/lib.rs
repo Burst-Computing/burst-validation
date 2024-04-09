@@ -17,8 +17,6 @@ use tokio::sync::Semaphore;
 
 extern crate serde_json;
 
-const DEFAULT_CONCURRENCY_LIMIT: usize = 1_000;
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Input {
     bucket: String,
@@ -43,6 +41,7 @@ struct S3Config {
     aws_access_key_id: String,
     aws_secret_access_key: String,
     aws_session_token: Option<String>,
+    max_concurrency: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -91,7 +90,7 @@ async fn sort_reduce(args: Input) -> Output {
     };
     let s3_client = S3Client::from_conf(config);
 
-    let semaphore = Arc::new(Semaphore::new(DEFAULT_CONCURRENCY_LIMIT));
+    let semaphore = Arc::new(Semaphore::new(args.s3_config.max_concurrency));
 
     let mut requests = (0..args.partitions)
         .map(|i| {
