@@ -1,16 +1,23 @@
-use std::{fs::File, io::Cursor, time::Instant};
-use std::time::{ SystemTime, SystemTimeError, UNIX_EPOCH };
+use std::sync::Arc;
+use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
+use std::{io::Cursor, time::Instant};
 
+use aws_config::Region;
+use aws_credential_types::Credentials;
+use aws_sdk_s3::Client as S3Client;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use polars::prelude::{
     CsvReader, CsvWriter, DataFrame, QuoteStyle, SerReader, SerWriter, SortOptions,
 };
-use rusoto_core::Region;
-use rusoto_s3::{GetObjectRequest, S3Client, S3};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{Error, Value};
 use tokio::io::AsyncReadExt;
+use tokio::sync::Semaphore;
 
 extern crate serde_json;
+
+const DEFAULT_CONCURRENCY_LIMIT: usize = 1_000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Input {
@@ -26,15 +33,16 @@ struct Input {
     mpu_key: String,
     mpu_id: String,
     tmp_prefix: String,
-    s3_config: S3Config
+    s3_config: S3Config,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct S3Config {
     region: String,
-    endpoint: String,
+    endpoint: Option<String>,
     aws_access_key_id: String,
     aws_secret_access_key: String,
+    aws_session_token: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -46,48 +54,85 @@ struct Output {
     init_fn_reduce: String,
     post_download_reduce: String,
     pre_upload_reduce: String,
-    end_fn_reduce: String
+    end_fn_reduce: String,
 }
 
 fn get_timestamp_in_milliseconds() -> Result<u128, SystemTimeError> {
-  let current_system_time = SystemTime::now();
-  let duration_since_epoch = current_system_time.duration_since(UNIX_EPOCH)?;
-  let milliseconds_timestamp = duration_since_epoch.as_millis();
+    let current_system_time = SystemTime::now();
+    let duration_since_epoch = current_system_time.duration_since(UNIX_EPOCH)?;
+    let milliseconds_timestamp = duration_since_epoch.as_millis();
 
-  Ok(milliseconds_timestamp)
+    Ok(milliseconds_timestamp)
 }
 
 async fn sort_reduce(args: Input) -> Output {
-    // using abandoned rusoto lib because aws sdk beta sucks and does not work with minio
     let init_fn_reduce = get_timestamp_in_milliseconds().unwrap().to_string();
-    let client = rusoto_core::request::HttpClient::new().unwrap();
-    let region = Region::Custom {
-        name: args.s3_config.region,
-        endpoint: args.s3_config.endpoint,
-    };
-    let creds = rusoto_core::credential::StaticProvider::new_minimal(
-        args.s3_config.aws_access_key_id,
-        args.s3_config.aws_secret_access_key,
+
+    // create s3 client
+    let credentials_provider = Credentials::from_keys(
+        args.s3_config.aws_access_key_id.clone(),
+        args.s3_config.aws_secret_access_key.clone(),
+        args.s3_config.aws_session_token.clone(),
     );
-    let s3_client = S3Client::new_with(client, creds, region);
+
+    let config = match args.s3_config.endpoint.clone() {
+        Some(endpoint) => {
+            aws_sdk_s3::config::Builder::new()
+                .endpoint_url(endpoint)
+                .credentials_provider(credentials_provider)
+                .region(Region::new(args.s3_config.region.clone()))
+                .force_path_style(true) // apply bucketname as path param instead of pre-domain
+                .build()
+        }
+        None => aws_sdk_s3::config::Builder::new()
+            .credentials_provider(credentials_provider)
+            .region(Region::new(args.s3_config.region.clone()))
+            .build(),
+    };
+    let s3_client = S3Client::from_conf(config);
+
+    let semaphore = Arc::new(Semaphore::new(DEFAULT_CONCURRENCY_LIMIT));
+
+    let mut requests = (0..args.partitions)
+        .map(|i| {
+            let key = format!(
+                "{}{}/{}.part{}",
+                args.tmp_prefix, args.partition_idx, args.key, i
+            );
+            tokio::spawn({
+                let client = s3_client.clone();
+                let bucket = args.bucket.clone();
+                let semaphore = semaphore.clone();
+                async move {
+                    let _permit = semaphore.acquire().await.unwrap();
+                    client.get_object().bucket(bucket).key(key).send().await
+                }
+            })
+        })
+        .collect::<FuturesUnordered<_>>();
+
+    let mut results = Vec::with_capacity(args.partitions as usize);
+
+    while let Some(f) = requests.next().await {
+        match f {
+            Ok(f) => match f {
+                Ok(res) => {
+                    results.push(res);
+                }
+                Err(e) => {
+                    println!("Error: {:?}", e);
+                }
+            },
+            Err(e) => {
+                println!("Error: {:?}", e);
+            }
+        }
+    }
 
     let mut agg_df: Option<DataFrame> = None;
-
-    for i in 0..args.partitions {
-        let key = format!(
-            "{}{}/{}.part{}",
-            args.tmp_prefix, args.partition_idx, args.key, i
-        );
-        let get_req = GetObjectRequest {
-            bucket: args.bucket.clone(),
-            key: key,
-            ..Default::default()
-        };
-        println!("{:?}", get_req);
-        let get_res = s3_client.get_object(get_req).await.unwrap();
-
-        let mut buffer: Vec<u8> = Vec::with_capacity(get_res.content_length.unwrap() as usize);
-        let mut reader = get_res.body.unwrap().into_async_read();
+    for res in results {
+        let mut buffer: Vec<u8> = Vec::with_capacity(res.content_length.unwrap() as usize);
+        let mut reader = res.body.into_async_read();
         while let Ok(sz) = reader.read_buf(&mut buffer).await {
             if sz == 0 {
                 break;
@@ -96,7 +141,7 @@ async fn sort_reduce(args: Input) -> Output {
 
         let cursor = Cursor::new(buffer);
 
-        let mut df_chunk: DataFrame = CsvReader::new(cursor)
+        let df_chunk: DataFrame = CsvReader::new(cursor)
             .infer_schema(Some(1))
             .has_header(false)
             .with_quote_char(None)
@@ -104,14 +149,51 @@ async fn sort_reduce(args: Input) -> Output {
             .unwrap();
 
         let a = match agg_df {
-            Some(ref df) => {
-                let new = df.vstack(&mut df_chunk).unwrap();
-                new
-            }
+            Some(ref df) => df.vstack(&df_chunk).unwrap(),
             None => df_chunk,
         };
         agg_df = Some(a);
     }
+
+    // for i in 0..args.partitions {
+    //     let key = format!(
+    //         "{}{}/{}.part{}",
+    //         args.tmp_prefix, args.partition_idx, args.key, i
+    //     );
+    //     let get_req = GetObjectRequest {
+    //         bucket: args.bucket.clone(),
+    //         key: key,
+    //         ..Default::default()
+    //     };
+    //     println!("{:?}", get_req);
+    //     let get_res = s3_client.get_object(get_req).await.unwrap();
+
+    //     let mut buffer: Vec<u8> = Vec::with_capacity(get_res.content_length.unwrap() as usize);
+    //     let mut reader = get_res.body.unwrap().into_async_read();
+    //     while let Ok(sz) = reader.read_buf(&mut buffer).await {
+    //         if sz == 0 {
+    //             break;
+    //         }
+    //     }
+
+    //     let cursor = Cursor::new(buffer);
+
+    //     let mut df_chunk: DataFrame = CsvReader::new(cursor)
+    //         .infer_schema(Some(1))
+    //         .has_header(false)
+    //         .with_quote_char(None)
+    //         .finish()
+    //         .unwrap();
+
+    //     let a = match agg_df {
+    //         Some(ref df) => {
+    //             let new = df.vstack(&mut df_chunk).unwrap();
+    //             new
+    //         }
+    //         None => df_chunk,
+    //     };
+    //     agg_df = Some(a);
+    // }
 
     let post_download_reduce = get_timestamp_in_milliseconds().unwrap().to_string();
 
@@ -150,16 +232,17 @@ async fn sort_reduce(args: Input) -> Output {
     let write_duration = write_start_t.elapsed();
     println!("Serialize time: {:?}", write_duration);
 
-    let mpu_input = rusoto_s3::UploadPartRequest {
-        bucket: args.bucket.clone(),
-        key: args.mpu_key.clone(),
-        part_number: (args.partition_idx + 1) as i64,
-        upload_id: args.mpu_id,
-        body: Some(buf.into()),
-        ..Default::default()
-    };
-    println!("{:?}", mpu_input);
-    let part_upload_res = s3_client.upload_part(mpu_input).await.unwrap();
+    let req = s3_client
+        .upload_part()
+        .bucket(args.bucket.clone())
+        .key(args.mpu_id.clone())
+        .part_number((args.partition_idx + 1) as i32)
+        .upload_id(args.mpu_id.clone())
+        .body(buf.into());
+
+    println!("{:?}", req);
+
+    let part_upload_res = req.send().await.unwrap();
 
     let end_fn_reduce = get_timestamp_in_milliseconds().unwrap().to_string();
 
@@ -169,11 +252,11 @@ async fn sort_reduce(args: Input) -> Output {
         bucket: args.bucket,
         key: args.mpu_key,
         part_number: args.partition_idx,
-        etag: etag,
-        init_fn_reduce: init_fn_reduce,
-        post_download_reduce: post_download_reduce,
-        pre_upload_reduce: pre_upload_reduce,
-        end_fn_reduce: end_fn_reduce
+        etag,
+        init_fn_reduce,
+        post_download_reduce,
+        pre_upload_reduce,
+        end_fn_reduce,
     }
 }
 

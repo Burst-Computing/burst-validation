@@ -1,16 +1,23 @@
-use std::{collections::HashMap, env, fs::File, io::Cursor, time::Instant};
-use std::time::{ SystemTime, SystemTimeError, UNIX_EPOCH };
+use std::sync::Arc;
+use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
+use std::{collections::HashMap, io::Cursor, time::Instant};
 
+use aws_config::Region;
+use aws_credential_types::Credentials;
+use aws_sdk_s3::Client as S3Client;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use polars::prelude::{
     AnyValue, ChunkedArray, CsvReader, CsvWriter, DataFrame, QuoteStyle, SerReader, SerWriter,
 };
-use rusoto_core::Region;
-use rusoto_s3::{GetObjectRequest, S3Client, S3};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{Error, Value};
 use tokio::io::AsyncReadExt;
+use tokio::sync::Semaphore;
 
 extern crate serde_json;
+
+const DEFAULT_CONCURRENCY_LIMIT: usize = 1_000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Input {
@@ -26,15 +33,16 @@ struct Input {
     mpu_key: String,
     mpu_id: String,
     tmp_prefix: String,
-    s3_config: S3Config
+    s3_config: S3Config,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct S3Config {
     region: String,
-    endpoint: String,
+    endpoint: Option<String>,
     aws_access_key_id: String,
     aws_secret_access_key: String,
+    aws_session_token: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -44,33 +52,47 @@ struct Output {
     init_fn_map: String,
     post_download_map: String,
     pre_upload_map: String,
-    end_fn_map: String
+    end_fn_map: String,
 }
 
 fn get_timestamp_in_milliseconds() -> Result<u128, SystemTimeError> {
-  let current_system_time = SystemTime::now();
-  let duration_since_epoch = current_system_time.duration_since(UNIX_EPOCH)?;
-  let milliseconds_timestamp = duration_since_epoch.as_millis();
+    let current_system_time = SystemTime::now();
+    let duration_since_epoch = current_system_time.duration_since(UNIX_EPOCH)?;
+    let milliseconds_timestamp = duration_since_epoch.as_millis();
 
-  Ok(milliseconds_timestamp)
+    Ok(milliseconds_timestamp)
 }
 
 async fn sort_map(args: Input) -> Output {
     let init_fn_map = get_timestamp_in_milliseconds().unwrap().to_string();
-    // using abandoned rusoto lib because aws sdk beta sucks and does not work with minio
-    let client = rusoto_core::request::HttpClient::new().unwrap();
-    let region = Region::Custom {
-        name: args.s3_config.region,
-        endpoint: args.s3_config.endpoint,
-    };
-    let creds = rusoto_core::credential::StaticProvider::new_minimal(
-        args.s3_config.aws_access_key_id,
-        args.s3_config.aws_secret_access_key,
+
+    // create s3 client
+    let credentials_provider = Credentials::from_keys(
+        args.s3_config.aws_access_key_id.clone(),
+        args.s3_config.aws_secret_access_key.clone(),
+        args.s3_config.aws_session_token.clone(),
     );
-    let s3_client = S3Client::new_with(client, creds, region);
+
+    let config = match args.s3_config.endpoint.clone() {
+        Some(endpoint) => {
+            aws_sdk_s3::config::Builder::new()
+                .endpoint_url(endpoint)
+                .credentials_provider(credentials_provider)
+                .region(Region::new(args.s3_config.region.clone()))
+                .force_path_style(true) // apply bucketname as path param instead of pre-domain
+                .build()
+        }
+        None => aws_sdk_s3::config::Builder::new()
+            .credentials_provider(credentials_provider)
+            .region(Region::new(args.s3_config.region.clone()))
+            .build(),
+    };
+    let s3_client = S3Client::from_conf(config);
 
     let row_size = args.row_size as u64;
-    let chunk_size = ((args.obj_size as f64 / args.partitions as f64) / row_size as f64).ceil() as u64 * row_size;
+    let chunk_size = ((args.obj_size as f64 / args.partitions as f64) / row_size as f64).ceil()
+        as u64
+        * row_size;
 
     let start_byte = args.partition_idx as u64 * chunk_size;
     let end_byte = (args.partition_idx + 1) as u64 * chunk_size;
@@ -90,18 +112,16 @@ async fn sort_map(args: Input) -> Output {
 
     let get_t0 = Instant::now();
     let get_res = s3_client
-        .get_object(GetObjectRequest {
-            bucket: args.bucket.clone(),
-            key: args.key.clone(),
-            range: Some(format!("bytes={}-{}", byte_range.0, byte_range.1)),
-            ..Default::default()
-        })
+        .get_object()
+        .bucket(args.bucket.clone())
+        .key(args.key.clone())
+        .range(format!("bytes={}-{}", byte_range.0, byte_range.1))
+        .send()
         .await
         .unwrap();
 
-
     let mut buffer: Vec<u8> = Vec::with_capacity(((byte_range.1 - byte_range.0) + 1) as usize);
-    let mut reader = get_res.body.unwrap().into_async_read();
+    let mut reader = get_res.body.into_async_read();
     while let Ok(sz) = reader.read_buf(&mut buffer).await {
         if sz == 0 {
             break;
@@ -133,16 +153,10 @@ async fn sort_map(args: Input) -> Output {
         };
         match res {
             Ok(x) => {
-                indexes
-                    .entry(x as u32)
-                    .or_insert(Vec::new())
-                    .push(idx as u32);
+                indexes.entry(x as u32).or_default().push(idx as u32);
             }
             Err(x) => {
-                indexes
-                    .entry(x as u32)
-                    .or_insert(Vec::new())
-                    .push(idx as u32);
+                indexes.entry(x as u32).or_default().push(idx as u32);
             }
         };
     }
@@ -150,49 +164,110 @@ async fn sort_map(args: Input) -> Output {
     println!("Shuffle time: {:?}", shuffle_duration);
 
     // println!("Partitions: {:?}", indexes.keys());
-    let mut keys: Vec<String> = Vec::new();
-
+    let mut keys: Vec<String> = Vec::with_capacity(indexes.len());
     let pre_upload_map = get_timestamp_in_milliseconds().unwrap().to_string();
-    for (bucket, indexes) in indexes.iter() {
-        let a = ChunkedArray::from_vec("partition", indexes.clone());
-        let mut partition_df = df_chunk.take(&a).unwrap();
 
-        let mut buf = Vec::new();
-        let write_start_t = Instant::now();
-        CsvWriter::new(&mut buf)
-            .has_header(false)
-            .with_quote_style(QuoteStyle::Never)
-            .finish(&mut partition_df)
-            .unwrap();
-        let write_duration = write_start_t.elapsed();
-        // println!("Serialize time: {:?}", write_duration);
+    let semaphore = Arc::new(Semaphore::new(DEFAULT_CONCURRENCY_LIMIT));
 
-        let key = format!(
-            "{}{}/{}.part{}",
-            args.tmp_prefix, bucket, args.key, args.partition_idx
-        );
-        println!("Going to upload partition {}, size = {}", key, buf.len());
-        let put_object_request = rusoto_s3::PutObjectRequest {
-            bucket: args.bucket.clone(),
-            key: key.clone(),
-            body: Some(buf.into()),
-            ..Default::default()
-        };
-        let put_t0 = Instant::now();
-        s3_client.put_object(put_object_request).await.unwrap();
-        let put_duration = put_t0.elapsed();
-        println!("Put time: {:?}", put_duration);
-        keys.push(key);
+    let mut requests = indexes
+        .into_iter()
+        .map(|(bucket, indexes)| {
+            let a = ChunkedArray::from_vec("partition", indexes.clone());
+            let mut partition_df = df_chunk.take(&a).unwrap();
+
+            let mut buf = Vec::with_capacity(partition_df.height() * args.row_size as usize);
+            let write_start_t = Instant::now();
+            CsvWriter::new(&mut buf)
+                .has_header(false)
+                .with_quote_style(QuoteStyle::Never)
+                .finish(&mut partition_df)
+                .unwrap();
+            let write_duration = write_start_t.elapsed();
+            println!("Serialize time: {:?}", write_duration);
+
+            let key = format!(
+                "{}{}/{}.part{}",
+                args.tmp_prefix, bucket, args.key, args.partition_idx
+            );
+            keys.push(key.clone());
+            println!("Going to upload partition {}, size = {}", key, buf.len());
+            tokio::spawn({
+                let client = s3_client.clone();
+                let bucket = args.bucket.clone();
+                let semaphore = semaphore.clone();
+                async move {
+                    let _permit = semaphore.acquire().await.unwrap();
+                    (
+                        key.clone(),
+                        client
+                            .put_object()
+                            .bucket(bucket)
+                            .key(key)
+                            .body(buf.into())
+                            .send()
+                            .await,
+                    )
+                }
+            })
+        })
+        .collect::<FuturesUnordered<_>>();
+
+    while let Some(f) = requests.next().await {
+        match f {
+            Ok((k, f)) => match f {
+                Ok(_) => {
+                    println!("Uploaded partition {:?}", k);
+                }
+                Err(e) => {
+                    println!("Error uploading partition {:?}: {:?}", k, e);
+                }
+            },
+            Err(e) => {
+                println!("Error: {:?}", e);
+            }
+        }
     }
+
+    // for (bucket, indexes) in indexes.iter() {
+    //     let a = ChunkedArray::from_vec("partition", indexes.clone());
+    //     let mut partition_df = df_chunk.take(&a).unwrap();
+
+    //     let mut buf = Vec::with_capacity(partition_df.height() * args.row_size as usize);
+    //     let write_start_t = Instant::now();
+    //     CsvWriter::new(&mut buf)
+    //         .has_header(false)
+    //         .with_quote_style(QuoteStyle::Never)
+    //         .finish(&mut partition_df)
+    //         .unwrap();
+    //     let write_duration = write_start_t.elapsed();
+    //     // println!("Serialize time: {:?}", write_duration);
+
+    //     let key = format!(
+    //         "{}{}/{}.part{}",
+    //         args.tmp_prefix, bucket, args.key, args.partition_idx
+    //     );
+    //     println!("Going to upload partition {}, size = {}", key, buf.len());
+    //     let put_object_request = rusoto_s3::PutObjectRequest {
+    //         bucket: args.bucket.clone(),
+    //         key: key.clone(),
+    //         body: Some(buf.into()),
+    //         ..Default::default()
+    //     };
+    //     let put_t0 = Instant::now();
+    //     s3_client.put_object(put_object_request).await.unwrap();
+    //     let put_duration = put_t0.elapsed();
+    //     println!("Put time: {:?}", put_duration);
+    //     keys.push(key);
+    // }
     let end_fn_map = get_timestamp_in_milliseconds().unwrap().to_string();
 
     Output {
         partition_idx: args.partition_idx,
         reduce_keys: keys,
-        init_fn_map: init_fn_map,
-        post_download_map: post_download_map,
-        pre_upload_map: pre_upload_map,
-        end_fn_map: end_fn_map
+        init_fn_map,
+        post_download_map,
+        pre_upload_map,
+        end_fn_map,
     }
 }
 
