@@ -192,6 +192,8 @@ async fn sort_reduce(args: Input) -> Output {
     let write_duration = write_start_t.elapsed();
     println!("Serialize time: {:?}", write_duration);
 
+    let len = buf.len();
+
     let req = s3_client
         .upload_part()
         .bucket(args.bucket.clone())
@@ -200,7 +202,7 @@ async fn sort_reduce(args: Input) -> Output {
         .upload_id(args.mpu_id.clone())
         .body(buf.into());
 
-    println!("{:?}", req);
+    println!("Uploading part {:?}, size: {:?}", args.partition_idx, len);
 
     let part_upload_res = req.send().await.unwrap();
 
