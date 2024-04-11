@@ -22,7 +22,7 @@ impl TokenBucket {
                     interval.tick().await;
 
                     if sem.available_permits() < capacity {
-                        sem.add_permits(1);
+                        sem.add_permits(capacity - sem.available_permits());
                     }
                 }
             }
