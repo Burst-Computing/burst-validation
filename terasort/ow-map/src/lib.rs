@@ -45,7 +45,7 @@ struct S3Config {
     aws_access_key_id: String,
     aws_secret_access_key: String,
     aws_session_token: Option<String>,
-    max_concurrency: usize,
+    max_rate: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -174,7 +174,7 @@ async fn sort_map(args: Input) -> Output {
 
     let token_bucket = Arc::new(TokenBucket::new(
         Duration::from_secs(1),
-        args.s3_config.max_concurrency,
+        args.s3_config.max_rate,
     ));
 
     let mut requests = indexes

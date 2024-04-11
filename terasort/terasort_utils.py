@@ -185,5 +185,5 @@ def add_terasort_to_parser(parser):
     parser.add_argument("--partitions", type=int, required=True, help="Number of partitions to sort the file into")
     parser.add_argument("--bucket", type=str, required=True, help="Terasort bucket name")
     parser.add_argument("--key", type=str, required=True, help="Terasort object key")
-    parser.add_argument("--max-concurrency-map", type=int, default=None, help="Maximum S3 concurrent requests for map stage")
-    parser.add_argument("--max-concurrency-reduce", type=int, default=None, help="Maximum S3 concurrent requests for reduce stage")
+    parser.add_argument("--max-rate-map", type=int, default=None, help="Maximum S3 request rate for map stage")
+    parser.add_argument("--max-rate-reduce", type=int, default=None, help="Maximum S3 request rate for reduce stage")

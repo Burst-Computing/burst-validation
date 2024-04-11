@@ -17,15 +17,15 @@ if __name__ == "__main__":
     params = generate_payload(endpoint=args.ts_endpoint, partitions=args.partitions, bucket=args.bucket, key=args.key,
                               sort_column=0)
 
-    # Calculate max concurrency
-    if args.max_concurrency_map is None:
-        args.max_concurrency_map = S3_MAX_PUT_RATE // args.partitions - 1
-    if args.max_concurrency_reduce is None:
-        args.max_concurrency_reduce = S3_MAX_GET_RATE // args.partitions - 1
+    # Calculate max request rate
+    if args.max_rate_map is None:
+        args.max_rate_map = S3_MAX_PUT_RATE // args.partitions - 1
+    if args.max_rate_reduce is None:
+        args.max_rate_reduce = S3_MAX_GET_RATE // args.partitions - 1
 
-    # Add map and reduce max concurrency inside s3_config
-    params_map = [dict(params[i], s3_config={**params[i].get('s3_config', {}), 'max_concurrency': args.max_concurrency_map}) for i in range(args.partitions)]
-    params_reduce = [dict(params[i], s3_config={**params[i].get('s3_config', {}), 'max_concurrency': args.max_concurrency_reduce}) for i in range(args.partitions)]
+    # Add map and reduce max rate inside s3_config
+    params_map = [dict(params[i], s3_config={**params[i].get('s3_config', {}), 'max_rate': args.max_rate_map}) for i in range(args.partitions)]
+    params_reduce = [dict(params[i], s3_config={**params[i].get('s3_config', {}), 'max_rate': args.max_rate_reduce}) for i in range(args.partitions)]
 
     executor = OpenwhiskExecutor(args.ow_host, args.ow_port, args.debug)
 
