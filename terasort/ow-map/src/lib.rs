@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
 use std::{collections::HashMap, io::Cursor, time::Instant};
 
 use aws_config::retry::RetryConfig;
@@ -14,9 +14,12 @@ use polars::prelude::{
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{Error, Value};
 use tokio::io::AsyncReadExt;
-use tokio::sync::Semaphore;
 
 extern crate serde_json;
+
+use crate::token_bucket::TokenBucket;
+
+mod token_bucket;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Input {
@@ -169,7 +172,10 @@ async fn sort_map(args: Input) -> Output {
     let mut keys: Vec<String> = Vec::with_capacity(indexes.len());
     let pre_upload_map = get_timestamp_in_milliseconds().unwrap().to_string();
 
-    let semaphore = Arc::new(Semaphore::new(args.s3_config.max_concurrency));
+    let token_bucket = Arc::new(TokenBucket::new(
+        Duration::from_secs(1),
+        args.s3_config.max_concurrency,
+    ));
 
     let mut requests = indexes
         .into_iter()
@@ -196,9 +202,9 @@ async fn sort_map(args: Input) -> Output {
             tokio::spawn({
                 let client = s3_client.clone();
                 let bucket = args.bucket.clone();
-                let semaphore = semaphore.clone();
+                let token_bucket = token_bucket.clone();
                 async move {
-                    let _permit = semaphore.acquire().await.unwrap();
+                    token_bucket.acquire().await;
                     (
                         key.clone(),
                         client
