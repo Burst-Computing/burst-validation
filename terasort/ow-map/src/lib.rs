@@ -228,10 +228,12 @@ async fn sort_map(args: Input) -> Output {
                 }
                 Err(e) => {
                     println!("Error uploading partition {:?}: {:?}", k, e);
+                    panic!("Error in uploading part");
                 }
             },
             Err(e) => {
                 println!("Error: {:?}", e);
+                panic!("Error in uploading part");
             }
         }
     }

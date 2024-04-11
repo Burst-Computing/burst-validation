@@ -129,10 +129,12 @@ async fn sort_reduce(args: Input) -> Output {
                 }
                 Err(e) => {
                     println!("Error: {:?}", e);
+                    panic!("Error in downloading part");
                 }
             },
             Err(e) => {
                 println!("Error: {:?}", e);
+                panic!("Error in downloading part");
             }
         }
     }
