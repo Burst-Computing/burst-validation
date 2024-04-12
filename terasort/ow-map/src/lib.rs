@@ -56,6 +56,8 @@ struct Output {
     post_download_map: String,
     pre_upload_map: String,
     end_fn_map: String,
+    partition_size: usize,
+    partition_sizes: HashMap<u32, usize>,
 }
 
 fn get_timestamp_in_milliseconds() -> Result<u128, SystemTimeError> {
@@ -133,6 +135,8 @@ async fn sort_map(args: Input) -> Output {
         }
     }
 
+    let partition_size = buffer.len();
+
     let post_download_map = get_timestamp_in_milliseconds().unwrap().to_string();
     let get_duration = get_t0.elapsed();
     println!("Get time: {:?}", get_duration);
@@ -177,6 +181,9 @@ async fn sort_map(args: Input) -> Output {
         args.s3_config.max_rate,
     ));
 
+    // store number of bytes written to each partition
+    let mut partition_sizes: HashMap<u32, usize> = HashMap::new();
+
     let mut requests = indexes
         .into_iter()
         .map(|(bucket, indexes)| {
@@ -192,6 +199,8 @@ async fn sort_map(args: Input) -> Output {
                 .unwrap();
             let write_duration = write_start_t.elapsed();
             println!("Serialize time: {:?}", write_duration);
+
+            partition_sizes.insert(bucket, buf.len());
 
             let key = format!(
                 "{}{}/{}.part{}",
@@ -247,6 +256,8 @@ async fn sort_map(args: Input) -> Output {
         post_download_map,
         pre_upload_map,
         end_fn_map,
+        partition_size,
+        partition_sizes,
     }
 }
 
