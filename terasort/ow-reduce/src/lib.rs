@@ -207,7 +207,7 @@ async fn sort_reduce(args: Input) -> Output {
     let req = s3_client
         .upload_part()
         .bucket(args.bucket.clone())
-        .key(args.mpu_id.clone())
+        .key(args.mpu_key.clone())
         .part_number((args.partition_idx + 1) as i32)
         .upload_id(args.mpu_id.clone())
         .body(buf.into());
