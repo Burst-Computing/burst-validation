@@ -1,4 +1,5 @@
 import argparse
+import json
 
 import pandas as pd
 
@@ -49,6 +50,8 @@ if __name__ == "__main__":
                           memory=args.runtime_memory if args.runtime_memory else 256,
                           custom_image=args.custom_image, is_zip=True)
 
+    map_results = dt_map.get_results()
+
     stats = pd.concat([stats,
                        pd.DataFrame({"fn_id": i["partition_idx"],
                                      "host_submit_map": host_submit_map,
@@ -56,8 +59,14 @@ if __name__ == "__main__":
                                      "post_download_map": i["post_download_map"],
                                      "pre_upload_map": i["pre_upload_map"],
                                      "end_fn_map": i["end_fn_map"]
-                                     } for i in dt_map.get_results())
+                                     } for i in map_results)
                        ])
+
+    # get number of bytes written to each partition for each map worker
+    partition_sizes = {i["partition_idx"]: {
+        "input_partition_size": i["partition_size"],
+        "output_partition_sizes": i["partition_sizes"]
+        } for i in map_results}
 
     host_submit_reduce = get_millis()
     dt_reduce = executor.map("terasort-reduce", params_reduce,
@@ -75,6 +84,7 @@ if __name__ == "__main__":
         stats.loc[stats["fn_id"] == i["part_number"], "finished"] = end_time
 
     stats.to_csv("terasort-classic-stats.csv", index=False)
+    json.dump(partition_sizes, open("terasort-classic-partition-sizes.json", "w"))
 
     # complete_mpu(endpoint=args.endpoint, bucket=args.bucket, key=params[0]['mpu_key'], upload_id=params[0]["mpu_id"],
     #              mpu={"Parts": [{"ETag": i['etag'], "PartNumber": i['part_number'] + 1} for i in
