@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use aws_config::Region;
 use aws_credential_types::Credentials;
@@ -34,6 +37,23 @@ struct S3InputParams {
 struct Output {
     bucket: String,
     key: String,
+    timestamps: Vec<Timestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct Timestamp {
+    key: String,
+    value: u128,
+}
+
+fn timestamp(key: String) -> Timestamp {
+    let current_system_time = SystemTime::now();
+    let duration_since_epoch = current_system_time.duration_since(UNIX_EPOCH).unwrap();
+    let milliseconds_timestamp = duration_since_epoch.as_millis();
+    Timestamp {
+        key,
+        value: milliseconds_timestamp,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -117,12 +137,15 @@ async fn get_adjacency_matrix(
         }
     }
 
-    println!("{:?}", edges);
+    // println!("{:?}", edges);
 
     (edges, (min_node, max_node + 1))
 }
 
 fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMessage>) -> Output {
+    let mut timestamps = Vec::new();
+    timestamps.push(timestamp("worker_start".to_string()));
+
     let worker = burst_middleware.info.worker_id;
 
     // create s3 client
@@ -157,20 +180,19 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
     // page_ranks contains the page rank of all nodes, where each index corresponds to the node id
     let init_pagerank = 1.0 / params.num_nodes as f64;
     let mut page_ranks = vec![init_pagerank; params.num_nodes as usize];
+    let mut norm = f64::MAX;
+    let mut iter = 0;
+    let mut sum = vec![0.0; params.num_nodes as usize];
     // graph contains the adjacency matrix of the nodes assigned to this worker
-    // we use CSR (compressed rows), since we will iterate over the columns for each row
     let (graph, nodes_range) = tokio_runtime.block_on(get_adjacency_matrix(&params, &s3_client));
 
+    timestamps.push(timestamp("get_input".to_string()));
     println!(
         "[Worker {}] Graph size: {:?} (range: {:?})",
         worker,
         graph.len(),
         nodes_range
     );
-
-    let mut norm = f64::MAX;
-    let mut iter = 0;
-    let mut sum = vec![0.0; params.num_nodes as usize];
 
     // calculate the number of outgoing links for each page of this worker
     let mut out_links = HashMap::new();
@@ -185,9 +207,12 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
         }
         out_links.insert(i, count);
     }
-    println!("[Worker {}] Outgoing links: {:?}", worker, out_links);
+    // println!("[Worker {}] Outgoing links: {:?}", worker, out_links);
 
     while (norm >= params.error) && (iter < MAX_ITER) {
+        println!("[Worker {}] *** Starting iteration {} ***", worker, iter);
+        timestamps.push(timestamp(format!("iter_{}_start", iter)));
+
         // while iter < MAX_ITER {
         let pr_msg = if burst_middleware.info.worker_id == ROOT_WORKER {
             println!("[Worker {}] Broadcast page rank weights", worker);
@@ -200,7 +225,8 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
         };
         page_ranks = pr_msg.0;
 
-        println!("[Worker {}] Page ranks: {:?}", worker, page_ranks);
+        // println!("[Worker {}] Page ranks: {:?}", worker, page_ranks);
+        timestamps.push(timestamp(format!("iter_{}_broadcast_weights", iter)));
 
         for i in nodes_range.0..nodes_range.1 {
             for j in 0..params.num_nodes {
@@ -213,7 +239,8 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
             }
         }
 
-        println!("[Worker {}] Sums: {:?}", worker, sum);
+        // println!("[Worker {}] Sums: {:?}", worker, sum);
+        timestamps.push(timestamp(format!("iter_{}_calc_sums", iter)));
 
         let sum_msg = burst_middleware
             .reduce(PagerankMessage(sum.clone()), |vec1, vec2| {
@@ -226,10 +253,11 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
                 PagerankMessage(reduced_sum)
             })
             .unwrap();
+        timestamps.push(timestamp(format!("iter_{}_reduce", iter)));
 
         let new_norm = if let Some(x) = sum_msg {
             println!("[Worker {}] ROOT --> Received reduced sum", worker);
-            println!("Reduced sum: {:?}", x.0);
+            // println!("Reduced sum: {:?}", x.0);
 
             // Root worker has the reduced sum of all ranks
             let new_page_ranks = x.0;
@@ -244,18 +272,20 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
 
             page_ranks = new_page_ranks;
             println!("[Worker {}] ROOT --> New error is {}", worker, norm);
-            println!("Page Ranks: {:?}", page_ranks);
+            // println!("Page Ranks: {:?}", page_ranks);
             Some(PagerankMessage(vec![norm]))
         } else {
             None
         };
 
+        println!("[Worker {}] Broadcast new error to all workers", worker);
         norm = burst_middleware
             .broadcast(new_norm, ROOT_WORKER)
             .unwrap()
             .0
             .pop()
             .unwrap();
+        timestamps.push(timestamp(format!("iter_{}_broadcast_err", iter)));
 
         iter += 1;
 
@@ -268,11 +298,15 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
         for val in &mut sum {
             *val = 0.0;
         }
+        timestamps.push(timestamp(format!("iter_{}_end", iter)));
     }
 
+    println!("[Worker {}] Finished", worker);
+    timestamps.push(timestamp("worker_end".to_string()));
     Output {
         bucket: params.input_data.bucket.clone(),
         key: params.input_data.key.clone(),
+        timestamps,
     }
 }
 
