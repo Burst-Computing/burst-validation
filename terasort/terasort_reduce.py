@@ -51,7 +51,7 @@ if __name__ == "__main__":
                                      "pre_upload_reduce": i["pre_upload_reduce"],
                                      "end_fn_reduce": i["end_fn_reduce"],
                                      "finished": end_time
-                                     } for i in dt_reduce.get_results())
+                                     } for i in dt_reduce.get_results() if "part_number" in i)
                        ])
 
     stats.to_csv("terasort-classic-onlyreduce.csv", index=False)
