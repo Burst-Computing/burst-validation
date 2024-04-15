@@ -22,6 +22,9 @@ AWS_S3_REGION = "us-east-1"
 AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", "lab144")
 AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "astl1a4b4")
 
+S3_MAX_PUT_RATE = 5500
+S3_MAX_GET_RATE = 3500
+
 
 def generate_payload(endpoint, partitions, bucket, key, sort_column, sort_output_key=None,
                      delimiter=',', bound_extraction_margin=DEFUALT_BOUND_EXTRACTION_MARGIN,
@@ -182,3 +185,5 @@ def add_terasort_to_parser(parser):
     parser.add_argument("--partitions", type=int, required=True, help="Number of partitions to sort the file into")
     parser.add_argument("--bucket", type=str, required=True, help="Terasort bucket name")
     parser.add_argument("--key", type=str, required=True, help="Terasort object key")
+    parser.add_argument("--max-rate-map", type=int, default=None, help="Maximum S3 request rate for map stage")
+    parser.add_argument("--max-rate-reduce", type=int, default=None, help="Maximum S3 request rate for reduce stage")
