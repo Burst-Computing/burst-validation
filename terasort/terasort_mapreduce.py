@@ -6,7 +6,7 @@ import pandas as pd
 from ow_client.parser import add_openwhisk_to_parser, try_or_except
 from ow_client.time_helper import get_millis
 from ow_client.openwhisk_executor import OpenwhiskExecutor
-from terasort_utils import S3_MAX_GET_RATE, S3_MAX_PUT_RATE, generate_payload, complete_mpu, add_terasort_to_parser
+from terasort_utils import S3_MAX_GET_RATE, S3_MAX_PUT_RATE, generate_payload, add_terasort_to_parser
 
 
 if __name__ == "__main__":
