@@ -23,7 +23,6 @@ if __name__ == "__main__":
         args.max_rate_reduce = S3_MAX_GET_RATE // args.partitions - 1
 
     # Add map and reduce max rate inside s3_config
-    params_map = [dict(params[i], s3_config={**params[i].get('s3_config', {}), 'max_rate': args.max_rate_map}) for i in range(args.partitions)]
     params_reduce = [dict(params[i], s3_config={**params[i].get('s3_config', {}), 'max_rate': args.max_rate_reduce}) for i in range(args.partitions)]
 
 
@@ -39,7 +38,7 @@ if __name__ == "__main__":
                                   "finished"])
 
     host_submit_reduce = get_millis()
-    dt_reduce = executor.map("terasort-reduce", params,
+    dt_reduce = executor.map("terasort-reduce", params_reduce,
                              file="terasort/terasort-reduce.zip",
                              memory=args.runtime_memory if args.runtime_memory else 256,
                              custom_image=args.custom_image, is_zip=True)

@@ -26,8 +26,6 @@ if __name__ == "__main__":
     # Add map and reduce max rate inside s3_config
     params_map = [dict(params[i], s3_config={**params[i].get('s3_config', {}), 'max_rate': args.max_rate_map}) for i in
                   range(args.partitions)]
-    params_reduce = [dict(params[i], s3_config={**params[i].get('s3_config', {}), 'max_rate': args.max_rate_reduce}) for
-                     i in range(args.partitions)]
 
     executor = OpenwhiskExecutor(args.ow_host, args.ow_port, args.debug)
 
@@ -40,7 +38,7 @@ if __name__ == "__main__":
                                   "end_fn_map"])
 
     host_submit_map = get_millis()
-    dt_map = executor.map("terasort-map", params,
+    dt_map = executor.map("terasort-map", params_map,
                           file="terasort/terasort-map.zip",
                           memory=args.runtime_memory if args.runtime_memory else 256,
                           custom_image=args.custom_image, is_zip=True)
