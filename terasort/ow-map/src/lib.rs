@@ -266,7 +266,7 @@ pub fn main(args: Value) -> Result<Value, Error> {
     println!("Starting sort map: {:?}", input);
 
     // create tokio thread runtime
-    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
+    let tokio_runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
