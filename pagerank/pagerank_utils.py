@@ -42,6 +42,6 @@ def add_pagerank_to_parser(parser):
     parser.add_argument("--pr-endpoint", type=str, required=True,
                         help="Endpoint of the S3 service in which the pagerank file is stored")
     parser.add_argument("--partitions", type=int, required=True, help="Number of partitions")
-    parser.add_argument("--num_nodes", type=int, required=True, help="Number of nodes in the dataset graph")
+    parser.add_argument("--num-nodes", type=int, required=True, help="Number of nodes in the dataset graph")
     parser.add_argument("--bucket", type=str, required=True, help="Pagerank bucket name")
     parser.add_argument("--key", type=str, required=True, help="Pagerank object key")
