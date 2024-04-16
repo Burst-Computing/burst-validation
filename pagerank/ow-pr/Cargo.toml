@@ -6,7 +6,7 @@ edition = "2021"
 resolver = "2"
 
 [dependencies]
-burst-communication-middleware = { path = "../../burst-communication-middleware", features = [
+burst-communication-middleware = { path = "../burst-communication-middleware", features = [
     "redis",
 ] }
 log = "0.4.20"
