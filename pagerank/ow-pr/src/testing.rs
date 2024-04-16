@@ -12,11 +12,11 @@ use std::{
 };
 
 // Burst options
-const GRANULARITY: u32 = 4;
+const GRANULARITY: u32 = 1;
 const INPUT_JSON_PARAMS: &str = "pagerank_payload.json";
 
 // Middleware options
-const ENABLE_CHUNKING: bool = false;
+const ENABLE_CHUNKING: bool = true;
 const MESSAGE_CHUNK_SIZE: usize = 1 * 1024 * 1024; // 1MB
 
 fn main() {
