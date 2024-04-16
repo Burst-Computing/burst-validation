@@ -10,7 +10,7 @@ burst-communication-middleware = { path = "../burst-communication-middleware", f
     "redis_list",
 ] }
 log = "0.4.20"
-aws-sdk-s3 = { verison = "1.14.0", features = ["behavior-version-latest"] }
+aws-sdk-s3 = { version = "1.14.0", features = ["behavior-version-latest"] }
 aws-config = { version = "1.1.9", features = ["behavior-version-latest"] }
 aws-credential-types = { version = "1.1.8", features = [
     "hardcoded-credentials",
