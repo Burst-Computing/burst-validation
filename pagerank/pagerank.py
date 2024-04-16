@@ -14,7 +14,7 @@ if __name__ == "__main__":
     add_burst_to_parser(parser)
     args = try_or_except(parser)
 
-    params = generate_payload(endpoint=args.ts_endpoint, partitions=args.partitions, num_nodes=args.num_nodes, bucket=args.bucket, 
+    params = generate_payload(endpoint=args.pr_endpoint, partitions=args.partitions, num_nodes=args.num_nodes, bucket=args.bucket, 
                               key=args.key)
 
     executor = OpenwhiskExecutor(args.ow_host, args.ow_port, args.debug)
