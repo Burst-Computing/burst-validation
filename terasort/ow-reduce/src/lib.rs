@@ -236,7 +236,7 @@ pub fn main(args: Value) -> Result<Value, Error> {
     let input: Input = serde_json::from_value(args)?;
 
     // create tokio thread runtime
-    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
+    let tokio_runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
