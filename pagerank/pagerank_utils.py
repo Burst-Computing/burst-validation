@@ -1,5 +1,6 @@
 import argparse
 import json
+import boto3
 import os
 from pprint import pprint
 
@@ -27,9 +28,15 @@ def generate_payload(endpoint, partitions, num_nodes, bucket, key, error=DEFAULT
                 },
             }
         )
-    
+
     return payload
 
+def complete_mpu(endpoint, bucket, key, upload_id, mpu):
+    s3_client = boto3.client("s3", endpoint_url=endpoint, aws_access_key_id=AWS_ACCESS_KEY_ID,
+                             aws_secret_access_key=AWS_SECRET_ACCESS_KEY, region_name=AWS_S3_REGION)
+    result = s3_client.complete_multipart_upload(Bucket=bucket, Key=key, UploadId=upload_id,
+                                                 MultipartUpload=mpu)
+    # print(result)
 
 def add_pagerank_to_parser(parser):
     parser.add_argument("--pr-endpoint", type=str, required=True,
