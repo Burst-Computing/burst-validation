@@ -6,13 +6,15 @@ edition = "2021"
 resolver = "2"
 
 [dependencies]
-burst-communication-middleware = { path = "../burst-communication-middleware", features = ["redis_list"] }
+burst-communication-middleware = { path = "../burst-communication-middleware", features = [
+    "redis_list",
+] }
 log = "0.4.20"
-# aws-config = { git = "https://github.com/awslabs/aws-sdk-rust", branch = "next" }
-# aws-sdk-s3 = { git = "https://github.com/awslabs/aws-sdk-rust", branch = "next" }
-rusoto_core = "0.48.0"
-rusoto_credential = "0.48.0"
-rusoto_s3 = "0.48.0"
+aws-sdk-s3 = { verison = "1.14.0", features = ["behavior-version-latest"] }
+aws-config = { version = "1.1.9", features = ["behavior-version-latest"] }
+aws-credential-types = { version = "1.1.8", features = [
+    "hardcoded-credentials",
+] }
 polars = "0.33.2"
 tokio = { version = "1.33.0", features = ["full"] }
 http = "0.2"
