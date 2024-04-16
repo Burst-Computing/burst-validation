@@ -1,6 +1,10 @@
 use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 use std::{collections::HashMap, io::Cursor, time::Instant};
 
+use aws_config::retry::RetryConfig;
+use aws_config::Region;
+use aws_credential_types::Credentials;
+use aws_sdk_s3::Client as S3Client;
 use burst_communication_middleware::Middleware;
 use bytes::Bytes;
 use polars::{
@@ -12,8 +16,6 @@ use polars::{
         SerReader, SerWriter,
     },
 };
-use rusoto_core::Region;
-use rusoto_s3::{GetObjectRequest, S3Client, S3};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{Error, Value};
 use tokio::io::AsyncReadExt;
@@ -40,9 +42,10 @@ struct Input {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct S3Config {
     region: String,
-    endpoint: String,
+    endpoint: Option<String>,
     aws_access_key_id: String,
     aws_secret_access_key: String,
+    aws_session_token: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -87,17 +90,16 @@ async fn get_chunk(s3_client: &S3Client, args: &Input) -> Vec<u8> {
     let byte_range = (start_byte, end_byte);
 
     let get_res = s3_client
-        .get_object(GetObjectRequest {
-            bucket: args.bucket.clone(),
-            key: args.key.clone(),
-            range: Some(format!("bytes={}-{}", byte_range.0, byte_range.1)),
-            ..Default::default()
-        })
+        .get_object()
+        .bucket(args.bucket.clone())
+        .key(args.key.clone())
+        .range(format!("bytes={}-{}", byte_range.0, byte_range.1))
+        .send()
         .await
         .unwrap();
 
     let mut buffer: Vec<u8> = Vec::with_capacity(((byte_range.1 - byte_range.0) + 1) as usize);
-    let mut reader = get_res.body.unwrap().into_async_read();
+    let mut reader = get_res.body.into_async_read();
     while let Ok(sz) = reader.read_buf(&mut buffer).await {
         if sz == 0 {
             break;
@@ -106,45 +108,50 @@ async fn get_chunk(s3_client: &S3Client, args: &Input) -> Vec<u8> {
     buffer
 }
 
-async fn upload_chunk_result(args: &Input, buf: Vec<u8>) -> String {
-    let client = rusoto_core::request::HttpClient::new().unwrap();
-    let region = Region::Custom {
-        name: args.s3_config.region.clone(),
-        endpoint: args.s3_config.endpoint.clone(),
-    };
-    let creds = rusoto_core::credential::StaticProvider::new_minimal(
-        args.s3_config.aws_access_key_id.clone(),
-        args.s3_config.aws_secret_access_key.clone(),
-    );
-    let s3_client = S3Client::new_with(client, creds, region);
-    let mpu_input = rusoto_s3::UploadPartRequest {
-        bucket: args.bucket.clone(),
-        key: args.mpu_key.clone(),
-        part_number: (args.partition_idx + 1) as i64,
-        upload_id: args.mpu_id.clone(),
-        body: Some(buf.into()),
-        ..Default::default()
-    };
-    // println!("{:?}", mpu_input);
-    let part_upload_res = s3_client.upload_part(mpu_input).await.unwrap();
+async fn upload_chunk_result(s3_client: &S3Client, args: &Input, buf: Vec<u8>) -> String {
+    let part_upload_res = s3_client
+        .upload_part()
+        .bucket(args.bucket.clone())
+        .key(args.mpu_key.clone())
+        .part_number((args.partition_idx + 1) as i32)
+        .upload_id(args.mpu_id.clone())
+        .body(buf.into())
+        .send()
+        .await
+        .unwrap();
     // println!("{:?}", part_upload_res);
     part_upload_res.e_tag.unwrap()
 }
 
+#[allow(dead_code)]
 fn sort_burst(args: Input, burst_middleware: Middleware<Bytes>) -> Output {
     let burst_middleware = burst_middleware.get_actor_handle();
     let init_fn = get_timestamp_in_milliseconds().unwrap().to_string();
-    // using abandoned rusoto lib because aws sdk beta sucks and does not work with minio
-    let client = rusoto_core::request::HttpClient::new().unwrap();
-    let region = Region::Custom {
-        name: args.s3_config.region.clone(),
-        endpoint: args.s3_config.endpoint.clone(),
-    };
-    let creds = rusoto_core::credential::StaticProvider::new_minimal(
+
+    // create s3 client
+    let credentials_provider = Credentials::from_keys(
         args.s3_config.aws_access_key_id.clone(),
         args.s3_config.aws_secret_access_key.clone(),
+        args.s3_config.aws_session_token.clone(),
     );
-    let s3_client = S3Client::new_with(client, creds, region);
+
+    let config = match args.s3_config.endpoint.clone() {
+        Some(endpoint) => {
+            aws_sdk_s3::config::Builder::new()
+                .endpoint_url(endpoint)
+                .credentials_provider(credentials_provider)
+                .region(Region::new(args.s3_config.region.clone()))
+                .force_path_style(true) // apply bucketname as path param instead of pre-domain
+                .retry_config(RetryConfig::adaptive())
+                .build()
+        }
+        None => aws_sdk_s3::config::Builder::new()
+            .credentials_provider(credentials_provider)
+            .region(Region::new(args.s3_config.region.clone()))
+            .retry_config(RetryConfig::adaptive())
+            .build(),
+    };
+    let s3_client = S3Client::from_conf(config);
 
     let tokio_runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -300,7 +307,7 @@ fn sort_burst(args: Input, burst_middleware: Middleware<Bytes>) -> Output {
     );
     let pre_upload = get_timestamp_in_milliseconds().unwrap().to_string();
     let put_part_t0 = Instant::now();
-    let etag = tokio_runtime.block_on(upload_chunk_result(&args, buf));
+    let etag = tokio_runtime.block_on(upload_chunk_result(&s3_client, &args, buf));
     let put_part_duration = put_part_t0.elapsed();
     println!(
         "[Worker {}] Put part time: {:?}",
@@ -326,17 +333,31 @@ fn sort_burst(args: Input, burst_middleware: Middleware<Bytes>) -> Output {
 fn sort_burst_all2all(args: Input, burst_middleware: Middleware<Bytes>) -> Output {
     let burst_middleware = burst_middleware.get_actor_handle();
     let init_fn = get_timestamp_in_milliseconds().unwrap().to_string();
-    // using abandoned rusoto lib because aws sdk beta sucks and does not work with minio
-    let client = rusoto_core::request::HttpClient::new().unwrap();
-    let region = Region::Custom {
-        name: args.s3_config.region.clone(),
-        endpoint: args.s3_config.endpoint.clone(),
-    };
-    let creds = rusoto_core::credential::StaticProvider::new_minimal(
+
+    // create s3 client
+    let credentials_provider = Credentials::from_keys(
         args.s3_config.aws_access_key_id.clone(),
         args.s3_config.aws_secret_access_key.clone(),
+        args.s3_config.aws_session_token.clone(),
     );
-    let s3_client = S3Client::new_with(client, creds, region);
+
+    let config = match args.s3_config.endpoint.clone() {
+        Some(endpoint) => {
+            aws_sdk_s3::config::Builder::new()
+                .endpoint_url(endpoint)
+                .credentials_provider(credentials_provider)
+                .region(Region::new(args.s3_config.region.clone()))
+                .force_path_style(true) // apply bucketname as path param instead of pre-domain
+                .retry_config(RetryConfig::adaptive())
+                .build()
+        }
+        None => aws_sdk_s3::config::Builder::new()
+            .credentials_provider(credentials_provider)
+            .region(Region::new(args.s3_config.region.clone()))
+            .retry_config(RetryConfig::adaptive())
+            .build(),
+    };
+    let s3_client = S3Client::from_conf(config);
 
     let tokio_runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -487,7 +508,7 @@ fn sort_burst_all2all(args: Input, burst_middleware: Middleware<Bytes>) -> Outpu
     );
     let pre_upload = get_timestamp_in_milliseconds().unwrap().to_string();
     let put_part_t0 = Instant::now();
-    let etag = tokio_runtime.block_on(upload_chunk_result(&args, buf));
+    let etag = tokio_runtime.block_on(upload_chunk_result(&s3_client, &args, buf));
     let put_part_duration = put_part_t0.elapsed();
     println!(
         "[Worker {}] Put part time: {:?}",
