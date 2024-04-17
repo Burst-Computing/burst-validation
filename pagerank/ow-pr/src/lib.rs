@@ -13,12 +13,13 @@ use serde_json::{Error, Value};
 use tokio::io::AsyncBufReadExt;
 
 const ROOT_WORKER: u32 = 0;
-const MAX_ITER: u32 = 100;
+const MAX_ITER: u32 = 30;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Input {
     input_data: S3InputParams,
     error: f64,
+    iterations: Option<u32>,
     num_nodes: u32,
 }
 
@@ -146,12 +147,23 @@ async fn get_adjacency_matrix(
     (edges, (min_node, max_node + 1))
 }
 
+fn do_iteration(iter: u32, max_iter: Option<u32>, err: f64, err_threshold: f64) -> bool {
+    if let Some(max_iter) = max_iter {
+        iter < max_iter
+    } else {
+        (err >= err_threshold) && (iter < MAX_ITER)
+    }
+}
+
 fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMessage>) -> Output {
     let mut timestamps = Vec::new();
     timestamps.push(timestamp("worker_start".to_string()));
 
     let worker = burst_middleware.info.worker_id;
-
+    println!(
+        "[Worker {}] Starting pagerank: {:?}",
+        burst_middleware.info.worker_id, params
+    );
     // create s3 client
     let credentials_provider = Credentials::from_keys(
         params.input_data.aws_access_key_id.clone(),
@@ -184,7 +196,7 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
     // page_ranks contains the page rank of all nodes, where each index corresponds to the node id
     let init_pagerank = 1.0 / params.num_nodes as f64;
     let mut page_ranks = vec![init_pagerank; params.num_nodes as usize];
-    let mut norm = f64::MAX;
+    let mut err = f64::MAX;
     let mut iter = 0;
     let mut sum = vec![0.0; params.num_nodes as usize];
     // graph contains the adjacency matrix of the nodes assigned to this worker
@@ -209,7 +221,7 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
     // println!("[Worker {}] Outgoing links: {:?}", worker, out_links);
     timestamps.push(timestamp("calc_outlinks".to_string()));
 
-    while (norm >= params.error) && (iter < MAX_ITER) {
+    while do_iteration(iter, params.iterations, err, params.error) {
         let iter_t0 = SystemTime::now();
         println!("[Worker {}] *** Starting iteration {} ***", worker, iter);
         timestamps.push(timestamp(format!("iter_{}_start", iter)));
@@ -276,7 +288,7 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
             // Root worker has the reduced sum of all ranks
             let new_page_ranks = x.0;
             // Calculate the difference between the new and old page ranks, sum the squares and take the square root
-            norm = new_page_ranks
+            err = new_page_ranks
                 .iter()
                 .zip(page_ranks.iter())
                 .map(|(a, b)| a - b)
@@ -285,23 +297,22 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
                 .sqrt();
 
             page_ranks = new_page_ranks;
-            println!("[Worker {}] ROOT --> New error is {}", worker, norm);
+            println!("[Worker {}] ROOT --> New error is {}", worker, err);
             // println!("Page Ranks: {:?}", page_ranks);
-            Some(PagerankMessage(vec![norm]))
+            Some(PagerankMessage(vec![err]))
         } else {
             None
         };
+        timestamps.push(timestamp(format!("iter_{}_calc_err", iter)));
 
         println!("[Worker {}] Broadcast new error to all workers", worker);
-        norm = burst_middleware
+        err = burst_middleware
             .broadcast(new_norm, ROOT_WORKER)
             .unwrap()
             .0
             .pop()
             .unwrap();
         timestamps.push(timestamp(format!("iter_{}_broadcast_err", iter)));
-
-        iter += 1;
 
         // Reset sum vector for the next iteration
         for val in &mut sum {
@@ -312,10 +323,11 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
 
         println!(
             "[Worker {}] *** Completed iteration {}, took {:.2} s, err is {} ***",
-            worker, iter, iter_t, norm
+            worker, iter, iter_t, err
         );
 
         timestamps.push(timestamp(format!("iter_{}_end", iter)));
+        iter += 1;
     }
 
     println!("[Worker {}] Finished", worker);
@@ -331,17 +343,9 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
 pub fn main(args: Value, burst_middleware: Middleware<PagerankMessage>) -> Result<Value, Error> {
     let input: Input = serde_json::from_value(args)?;
     let burst_middleware = burst_middleware.get_actor_handle();
-    println!(
-        "[Worker {}] Starting pagerank: {:?}",
-        burst_middleware.info.worker_id, input
-    );
 
     let result = pagerank(input, &burst_middleware);
 
-    println!(
-        "[Worker {}] Done: {:?}",
-        burst_middleware.info.worker_id, result
-    );
     serde_json::to_value(result)
 }
 

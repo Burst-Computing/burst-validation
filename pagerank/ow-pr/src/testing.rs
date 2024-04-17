@@ -101,8 +101,12 @@ fn main() {
         })
         .collect::<Vec<_>>();
 
+    let mut results = Vec::with_capacity(threads.len());
     for thread in threads {
-        let worker_result = thread.join();
-        println!("{:?}", worker_result.unwrap());
+        let worker_result = thread.join().unwrap().unwrap();
+        results.push(worker_result);
     }
+
+    let output_file = File::create("pagerank_output.json").unwrap();
+    serde_json::to_writer(output_file, &results).unwrap();
 }
