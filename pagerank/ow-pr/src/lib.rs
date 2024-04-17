@@ -242,20 +242,6 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
         // println!("[Worker {}] Page ranks: {:?}", worker, page_ranks);
         timestamps.push(timestamp(format!("iter_{}_broadcast_weights", iter)));
 
-        // for i in nodes_range.0..nodes_range.1 {
-        //     println!("[Worker {}] Calculating sum for node {}", worker, i);
-        //     for j in 0..params.num_nodes {
-        //         if let Some(edges) = graph.get(&i) {
-        //             if edges.contains(&j) {
-        //                 let n_out_links = *out_links.get(&i).unwrap_or(&1) as f64;
-        //                 sum[j as usize] += page_ranks[i as usize] / n_out_links;
-        //             }
-        //         }
-        //     }
-        // }
-
-        // println!("{:?} {:?}", sum.len(), page_ranks.len());
-
         for (node, links) in graph.iter() {
             // println!("[Worker {}] Calculating sum for node {}", worker, node);
             for link in links.iter() {
