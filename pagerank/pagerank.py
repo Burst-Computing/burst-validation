@@ -1,10 +1,11 @@
 import argparse
 import pandas as pd
+import json
 
 from ow_client.parser import add_openwhisk_to_parser, add_burst_to_parser, try_or_except
 from ow_client.time_helper import get_millis
 from ow_client.openwhisk_executor import OpenwhiskExecutor
-from pagerank_utils import generate_payload, complete_mpu, add_pagerank_to_parser
+from pagerank_utils import generate_payload, add_pagerank_to_parser
 
 
 if __name__ == "__main__":
@@ -36,15 +37,10 @@ if __name__ == "__main__":
     flattened_results = [item for sublist in dt.get_results() for item in sublist]
     flattened_results.sort(key=lambda x: x['key'])
 
-    stats = pd.DataFrame({"fn_id": i["key"],
-                          "host_submit": host_submit,
-                          "timestamps": i["timestamps"],
-                          "finished": finished
-                          } for i in flattened_results)
+    results = [{"fn_id": i["key"],
+                "host_submit": host_submit,
+                "timestamps": i["timestamps"],
+                "finished": finished
+                } for i in flattened_results]
 
-    stats.to_csv("pagerank.csv", index=False)
-
-    # complete_mpu(endpoint=args.ts_endpoint, bucket=args.bucket, key=params[0]['mpu_key'],
-    #              upload_id=params[0]["mpu_id"],
-    #              mpu={"Parts": [{"ETag": i['etag'], "PartNumber": i['part_number'] + 1} for i in flattened_results]})
-    print("Dummy MPU completion done!")
+    json.dump(results, open("pagerank-burst.json", "w"))
