@@ -247,6 +247,7 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
         for (node, links) in graph.iter() {
             // println!("[Worker {}] Calculating sum for node {}", worker, node);
             for link in links.iter() {
+                let link = &(link % params.num_nodes);
                 // println!("{:?}", link);
                 let n_out_links = *out_links.get(node).unwrap_or(&1) as f64;
                 sum[*link as usize] += page_ranks[*node as usize] / n_out_links;
