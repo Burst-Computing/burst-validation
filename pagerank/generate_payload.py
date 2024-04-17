@@ -17,6 +17,7 @@ if __name__ == "__main__":
     parser.add_argument("--aws_access_key_id", type=str, required=True, help="AWS access key ID")
     parser.add_argument("--aws_secret_access_key", type=str, required=True, help="AWS secret access key")
     parser.add_argument("--output", type=str, default="pagerank_payload.json", help="Output file path")
+    parser.add_argument("--split", type=int, default=1, help="Split output file")
     args = parser.parse_args()
 
     pprint(args)
@@ -38,5 +39,12 @@ if __name__ == "__main__":
             }
         )
 
-    with open(args.output, "w") as f:
-        f.write(json.dumps(payload, indent=4))
+    if args.split == 1:
+        with open(args.output, "w") as f:
+            f.write(json.dumps(payload, indent=4))
+    else:
+        assert args.partitions % args.split == 0
+        sz = args.partitions // args.split
+        for i in range(args.split):
+            with open(f"part-{str(i).zfill(4)}" + args.output, "w") as f:
+                f.write(json.dumps(payload[sz * i:(sz * i) + sz], indent=4))

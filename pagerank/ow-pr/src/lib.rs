@@ -61,6 +61,8 @@ pub struct PagerankMessage(Vec<f64>);
 
 impl From<Bytes> for PagerankMessage {
     fn from(bytes: Bytes) -> Self {
+        // println!("Cast from bytes, size is {:?}", bytes.len());
+
         let mut vecu8 = bytes.to_vec();
         let vecf64 = unsafe {
             let ratio = std::mem::size_of::<f64>() / std::mem::size_of::<u8>();
@@ -92,7 +94,9 @@ impl From<PagerankMessage> for Bytes {
             // Construct new Vec
             Vec::from_raw_parts(ptr, length, capacity)
         };
-        Bytes::from(vec8)
+        let b = Bytes::from(vec8);
+        // println!("Cast to bytes, size is {:?}", b.len());
+        b
     }
 }
 
@@ -195,21 +199,18 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
     );
 
     // calculate the number of outgoing links for each page of this worker
+    println!("[Worker {}] Calculating outgoing links", worker);
     let mut out_links = HashMap::new();
     for i in nodes_range.0..nodes_range.1 {
-        let mut count = 0;
-        for j in 0..params.num_nodes {
-            if let Some(edges) = graph.get(&i) {
-                if edges.contains(&j) {
-                    count += 1;
-                }
-            }
+        if let Some(edges) = graph.get(&i) {
+            out_links.insert(i, edges.len());
         }
-        out_links.insert(i, count);
     }
     // println!("[Worker {}] Outgoing links: {:?}", worker, out_links);
+    timestamps.push(timestamp("calc_outlinks".to_string()));
 
     while (norm >= params.error) && (iter < MAX_ITER) {
+        let iter_t0 = SystemTime::now();
         println!("[Worker {}] *** Starting iteration {} ***", worker, iter);
         timestamps.push(timestamp(format!("iter_{}_start", iter)));
 
@@ -224,18 +225,31 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
             burst_middleware.broadcast(None, ROOT_WORKER).unwrap()
         };
         page_ranks = pr_msg.0;
+        println!("[Worker {}] Received updated page ranks", worker);
 
         // println!("[Worker {}] Page ranks: {:?}", worker, page_ranks);
         timestamps.push(timestamp(format!("iter_{}_broadcast_weights", iter)));
 
-        for i in nodes_range.0..nodes_range.1 {
-            for j in 0..params.num_nodes {
-                if let Some(edges) = graph.get(&i) {
-                    if edges.contains(&j) {
-                        let n_out_links = *out_links.get(&i).unwrap_or(&1) as f64;
-                        sum[j as usize] += page_ranks[i as usize] / n_out_links;
-                    }
-                }
+        // for i in nodes_range.0..nodes_range.1 {
+        //     println!("[Worker {}] Calculating sum for node {}", worker, i);
+        //     for j in 0..params.num_nodes {
+        //         if let Some(edges) = graph.get(&i) {
+        //             if edges.contains(&j) {
+        //                 let n_out_links = *out_links.get(&i).unwrap_or(&1) as f64;
+        //                 sum[j as usize] += page_ranks[i as usize] / n_out_links;
+        //             }
+        //         }
+        //     }
+        // }
+
+        // println!("{:?} {:?}", sum.len(), page_ranks.len());
+
+        for (node, links) in graph.iter() {
+            // println!("[Worker {}] Calculating sum for node {}", worker, node);
+            for link in links.iter() {
+                // println!("{:?}", link);
+                let n_out_links = *out_links.get(node).unwrap_or(&1) as f64;
+                sum[*link as usize] += page_ranks[*node as usize] / n_out_links;
             }
         }
 
@@ -289,15 +303,18 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
 
         iter += 1;
 
-        println!(
-            "[Worker {}] *** Completed iteration {}, err is {} ***",
-            worker, iter, norm
-        );
-
         // Reset sum vector for the next iteration
         for val in &mut sum {
             *val = 0.0;
         }
+        let iter_t1 = SystemTime::now();
+        let iter_t = iter_t1.duration_since(iter_t0).unwrap().as_secs_f32();
+
+        println!(
+            "[Worker {}] *** Completed iteration {}, took {:.2} s, err is {} ***",
+            worker, iter, iter_t, norm
+        );
+
         timestamps.push(timestamp(format!("iter_{}_end", iter)));
     }
 
