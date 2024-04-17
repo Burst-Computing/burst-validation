@@ -43,7 +43,7 @@ struct Output {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Timestamp {
     key: String,
-    value: u128,
+    value: String,
 }
 
 fn timestamp(key: String) -> Timestamp {
@@ -52,7 +52,7 @@ fn timestamp(key: String) -> Timestamp {
     let milliseconds_timestamp = duration_since_epoch.as_millis();
     Timestamp {
         key,
-        value: milliseconds_timestamp,
+        value: milliseconds_timestamp.to_string(),
     }
 }
 
@@ -247,6 +247,7 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
         for (node, links) in graph.iter() {
             // println!("[Worker {}] Calculating sum for node {}", worker, node);
             for link in links.iter() {
+                let link = &(link % params.num_nodes);
                 // println!("{:?}", link);
                 let n_out_links = *out_links.get(node).unwrap_or(&1) as f64;
                 sum[*link as usize] += page_ranks[*node as usize] / n_out_links;
