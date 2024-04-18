@@ -228,16 +228,23 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
 
         // while iter < MAX_ITER {
         let pr_msg = if burst_middleware.info.worker_id == ROOT_WORKER {
-            println!("[Worker {}] Broadcast page rank weights", worker);
+            println!(
+                "[Worker {}] ROOT --> Broadcast page rank weights to all workers",
+                worker
+            );
             burst_middleware
                 .broadcast(Some(PagerankMessage(page_ranks.clone())), ROOT_WORKER)
                 .unwrap()
         } else {
-            println!("[Worker {}] Waiting for updated page rank weights", worker);
-            burst_middleware.broadcast(None, ROOT_WORKER).unwrap()
+            println!(
+                "[Worker {}] Waiting for updated page rank weights...",
+                worker
+            );
+            let weights = burst_middleware.broadcast(None, ROOT_WORKER).unwrap();
+            println!("[Worker {}] Received updated page ranks", worker);
+            weights
         };
         page_ranks = pr_msg.0;
-        println!("[Worker {}] Received updated page ranks", worker);
 
         // println!("[Worker {}] Page ranks: {:?}", worker, page_ranks);
         timestamps.push(timestamp(format!("iter_{}_broadcast_weights", iter)));
@@ -255,6 +262,7 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
         // println!("[Worker {}] Sums: {:?}", worker, sum);
         timestamps.push(timestamp(format!("iter_{}_calc_sums", iter)));
 
+        println!("[Worker {}] Reducing sums", worker);
         let sum_msg = burst_middleware
             .reduce(PagerankMessage(sum.clone()), |vec1, vec2| {
                 let reduced_sum = vec1
@@ -286,13 +294,17 @@ fn pagerank(params: Input, burst_middleware: &MiddlewareActorHandle<PagerankMess
             page_ranks = new_page_ranks;
             println!("[Worker {}] ROOT --> New error is {}", worker, err);
             // println!("Page Ranks: {:?}", page_ranks);
+            println!(
+                "[Worker {}] ROOT --> Broadcast new error to all workers",
+                worker
+            );
             Some(PagerankMessage(vec![err]))
         } else {
+            println!("[Worker {}] Waiting for updated error...", worker);
             None
         };
         timestamps.push(timestamp(format!("iter_{}_calc_err", iter)));
 
-        println!("[Worker {}] Broadcast new error to all workers", worker);
         err = burst_middleware
             .broadcast(new_norm, ROOT_WORKER)
             .unwrap()

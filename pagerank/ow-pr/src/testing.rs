@@ -3,6 +3,7 @@ use burst_communication_middleware::{
     BurstMiddleware, BurstOptions, Middleware, RedisListImpl, RedisListOptions, TokioChannelImpl,
     TokioChannelOptions,
 };
+use clap::Parser;
 use log::info;
 use serde_json::Value;
 use std::{
@@ -11,33 +12,50 @@ use std::{
     thread,
 };
 
-// Burst options
-const GRANULARITY: u32 = 1;
-const INPUT_JSON_PARAMS: &str = "pagerank_payload.json";
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[arg(short, long)]
+    granularity: u32,
 
-// Middleware options
-const ENABLE_CHUNKING: bool = true;
-const MESSAGE_CHUNK_SIZE: usize = 1 * 1024 * 1024; // 1MB
+    #[arg(short, long)]
+    burst_size: u32,
+
+    #[arg(short, long, default_value = "pagerank_payload.json")]
+    input_json_params: String,
+
+    #[arg(short, long, default_value = "pagerank_output.json")]
+    output_json_params: String,
+
+    #[arg(short, long)]
+    redis_url: String,
+
+    #[arg(short, long, default_value = "true")]
+    enable_chunking: bool,
+
+    #[arg(short, long, default_value = "1048576")]
+    message_chunk_size: usize,
+}
 
 fn main() {
-    // env_logger::init();
+    env_logger::init();
 
-    let input_json_file = File::open(INPUT_JSON_PARAMS).unwrap();
+    let args = Args::parse();
+
+    let input_json_file = File::open(args.input_json_params).unwrap();
     let params: Vec<Value> = serde_json::from_reader(input_json_file).unwrap();
 
     println!("params: {:?}", params);
 
-    let burst_size = params.len() as u32;
-    println!("burst_size: {}", burst_size);
-
-    if burst_size % GRANULARITY != 0 {
+    if args.burst_size % args.granularity != 0 {
         panic!(
             "BURST_SIZE {} must be divisible by GRANULARITY {}",
-            burst_size, GRANULARITY
+            args.burst_size, args.granularity
         );
     }
 
-    let num_groups = burst_size / GRANULARITY;
+    let num_groups = args.burst_size / args.granularity;
     println!("num_groups: {}", num_groups);
     let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -47,7 +65,8 @@ fn main() {
         .map(|group_id| {
             (
                 group_id.to_string(),
-                ((GRANULARITY * group_id)..((GRANULARITY * group_id) + GRANULARITY)).collect(),
+                ((args.granularity * group_id)..((args.granularity * group_id) + args.granularity))
+                    .collect(),
             )
         })
         .collect::<HashMap<String, HashSet<u32>>>();
@@ -55,15 +74,15 @@ fn main() {
     let mut actors = (0..num_groups)
         .flat_map(|group_id| {
             let burst_options =
-                BurstOptions::new(burst_size, group_ranges.clone(), group_id.to_string())
+                BurstOptions::new(args.burst_size, group_ranges.clone(), group_id.to_string())
                     .burst_id("pagerank".to_string())
-                    .enable_message_chunking(ENABLE_CHUNKING)
-                    .message_chunk_size(MESSAGE_CHUNK_SIZE)
+                    .enable_message_chunking(args.enable_chunking)
+                    .message_chunk_size(args.message_chunk_size)
                     .build();
             let channel_options = TokioChannelOptions::new()
                 .broadcast_channel_size(256)
                 .build();
-            let backend_options = RedisListOptions::new("redis://127.0.0.1".to_string()).build();
+            let backend_options = RedisListOptions::new(args.redis_url.clone()).build();
 
             let fut = BurstMiddleware::create_proxies::<TokioChannelImpl, RedisListImpl, _, _>(
                 burst_options,
@@ -107,6 +126,6 @@ fn main() {
         results.push(worker_result);
     }
 
-    let output_file = File::create("pagerank_output.json").unwrap();
+    let output_file = File::create(args.output_json_params).unwrap();
     serde_json::to_writer(output_file, &results).unwrap();
 }
