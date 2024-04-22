@@ -122,7 +122,7 @@ fn hyperparameter_tuning(args: Input,  burst_middleware: Middleware<Bytes>) -> O
 
     let post_download_chunk = get_timestamp_in_milliseconds().unwrap().to_string();
 
-    let mut file = File::create("input.txt").unwrap();
+    let mut file = File::create("./train.ft.txt.bz2").unwrap();
     file.write_all(&buffer).unwrap();
 
     let input_gathered = get_timestamp_in_milliseconds().unwrap().to_string();
@@ -134,6 +134,16 @@ fn hyperparameter_tuning(args: Input,  burst_middleware: Middleware<Bytes>) -> O
             burst_middleware.recv(i);
         }
     }
+
+   // start Python hyperparameter tuning execution
+    let mut cmd = std::process::Command::new("python3");
+    cmd.arg("/gridsearch.py");
+    cmd.arg("--jobs 1");
+
+    let output = cmd.output().expect("failed to execute process");
+
+    println!("status: {}", output.status);
+    println!("stdout: {}", String::from_utf8_lossy(&output.stdout));
 
     let end_fn = get_timestamp_in_milliseconds().unwrap().to_string();
 
