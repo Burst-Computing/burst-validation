@@ -3,6 +3,7 @@ use burst_communication_middleware::{
     BurstMiddleware, BurstOptions, Middleware, RedisListImpl, RedisListOptions, TokioChannelImpl,
     TokioChannelOptions,
 };
+use bytes::Bytes;
 use clap::Parser;
 use log::info;
 use serde_json::Value;
@@ -16,17 +17,20 @@ use std::{
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    #[arg(short, long, default_value = "pagerank")]
+    burst_id: String,
+
     #[arg(short, long)]
     granularity: u32,
 
     #[arg(short, long)]
     burst_size: u32,
 
-    #[arg(short, long, default_value = "pagerank_payload.json")]
-    input_json_params: String,
+    #[arg(short, long)]
+    group_id: u32,
 
-    #[arg(short, long, default_value = "pagerank_output.json")]
-    output_json_params: String,
+    #[arg(short, long, default_value = "input_payload.json")]
+    input_json_params: String,
 
     #[arg(short, long)]
     redis_url: String,
@@ -45,8 +49,6 @@ fn main() {
 
     let input_json_file = File::open(args.input_json_params).unwrap();
     let params: Vec<Value> = serde_json::from_reader(input_json_file).unwrap();
-
-    println!("params: {:?}", params);
 
     if args.burst_size % args.granularity != 0 {
         panic!(
@@ -71,42 +73,44 @@ fn main() {
         })
         .collect::<HashMap<String, HashSet<u32>>>();
 
-    let mut actors = (0..num_groups)
-        .flat_map(|group_id| {
-            let burst_options =
-                BurstOptions::new(args.burst_size, group_ranges.clone(), group_id.to_string())
-                    .burst_id("pagerank".to_string())
-                    .enable_message_chunking(args.enable_chunking)
-                    .message_chunk_size(args.message_chunk_size)
-                    .build();
-            let channel_options = TokioChannelOptions::new()
-                .broadcast_channel_size(256)
-                .build();
-            let backend_options = RedisListOptions::new(args.redis_url.clone()).build();
+    let burst_options = BurstOptions::new(
+        args.burst_size,
+        group_ranges.clone(),
+        args.group_id.to_string(),
+    )
+    .burst_id(args.burst_id.clone())
+    .enable_message_chunking(args.enable_chunking)
+    .message_chunk_size(args.message_chunk_size)
+    .build();
+    let channel_options = TokioChannelOptions::new()
+        .broadcast_channel_size(256)
+        .build();
+    let backend_options = RedisListOptions::new(args.redis_url.clone()).build();
 
-            let fut = BurstMiddleware::create_proxies::<TokioChannelImpl, RedisListImpl, _, _>(
-                burst_options,
-                channel_options,
-                backend_options,
-            );
-            let proxies = tokio_runtime.block_on(fut).unwrap();
+    let fut = BurstMiddleware::create_proxies::<TokioChannelImpl, RedisListImpl, _, _>(
+        burst_options,
+        channel_options,
+        backend_options,
+    );
+    let proxies = tokio_runtime.block_on(fut).unwrap();
 
-            proxies
-                .into_iter()
-                .map(|(worker_id, middleware)| {
-                    (
-                        worker_id,
-                        Middleware::new(middleware, tokio_runtime.handle().clone()),
-                    )
-                })
-                .collect::<HashMap<u32, Middleware<PagerankMessage>>>()
+    let actors = proxies
+        .into_iter()
+        .map(|(worker_id, middleware)| {
+            (
+                worker_id,
+                Middleware::new(middleware, tokio_runtime.handle().clone()),
+            )
         })
-        .collect::<Vec<_>>();
+        .collect::<HashMap<u32, Middleware<PagerankMessage>>>();
 
-    // sort actors by worker_id so that the order of the workers and the ordered params is correct
-    actors.sort_by(|(a, _), (b, _)| a.cmp(b));
+    let mut actors_vec = actors.into_iter().collect::<Vec<_>>();
+    // sort proxies by worker_id so that the order of the workers and the ordered params is correct
+    actors_vec.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-    let threads = actors
+    assert!(actors_vec.len() == params.len());
+
+    let threads = actors_vec
         .into_iter()
         .zip(params)
         .map(|(proxies, param)| {
@@ -126,6 +130,7 @@ fn main() {
         results.push(worker_result);
     }
 
-    let output_file = File::create(args.output_json_params).unwrap();
+    let output_filename = format!("output_{}_group-{}.json", args.burst_id, args.group_id);
+    let output_file = File::create(output_filename).unwrap();
     serde_json::to_writer(output_file, &results).unwrap();
 }
