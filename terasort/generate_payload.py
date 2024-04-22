@@ -21,12 +21,10 @@ DEFUALT_BOUND_EXTRACTION_MARGIN: int = 1024 * 1024
 DEFAULT_PAYLOAD_FILENAME = "sort_payload"
 DEFAULT_TMP_PREFIX = "tmp/"
 
-AWS_S3_REGION = "us-east-1"
-AWS_S3_ENDPOINT = "http://localhost:9000"
+AWS_S3_REGION = None
+AWS_S3_ENDPOINT = None
 AWS_ACCESS_KEY_ID = "minioadmin"
 AWS_SECRET_ACCESS_KEY = "minioadmin"
-
-RABBITMQ_URI = "amqp://rabbit:123456@localhost:5672"
 
 
 def main():
@@ -48,15 +46,25 @@ def main():
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
     parser.add_argument("--payload-filename", type=str, default=DEFAULT_PAYLOAD_FILENAME, help="Payload filename")
     parser.add_argument("--tmp-prefix", type=str, default=DEFAULT_TMP_PREFIX, help="Prefix for temorary data in S3")
+    parser.add_argument("--s3_region", type=str, default=AWS_S3_REGION, help="S3 region")
+    parser.add_argument("--s3_endpoint", type=str, default=AWS_S3_ENDPOINT, help="S3 endpoint")
+    parser.add_argument("--aws_access_key_id", type=str, default=AWS_ACCESS_KEY_ID, help="AWS access key id")
     parser.add_argument(
-        "--rabbitmq-uri", type=str, default=RABBITMQ_URI, help="RabbitMQ uri for burst indirect communication"
+        "--aws_secret_access_key", type=str, default=AWS_SECRET_ACCESS_KEY, help="AWS secret access key"
     )
+    parser.add_argument("--split", type=int, default=1, help="Split output into multiple files")
     args = parser.parse_args()
 
     if args.seed is not None:
         random.seed(args.seed)
 
-    s3_client = boto3.client("s3", endpoint_url="http://localhost:9000")
+    s3_client = boto3.client(
+        "s3",
+        endpoint_url=args.s3_endpoint,
+        region_name=args.s3_region,
+        aws_access_key_id=args.aws_access_key_id,
+        aws_secret_access_key=args.aws_secret_access_key,
+    )
     obj_size = s3_client.head_object(Bucket=args.bucket, Key=args.key)["ContentLength"]
 
     # Avoid dataset head and tail
@@ -156,7 +164,7 @@ def main():
     # Generate multipart upload
     output_key = args.sort_output_key if args.sort_output_key is not None else args.key + ".sorted"
     mpu_res = s3_client.create_multipart_upload(Bucket=args.bucket, Key=output_key)
-    #print(mpu_res)
+    # print(mpu_res)
     mpu_id = mpu_res["UploadId"]
 
     # pprint(segment_bounds)
@@ -177,18 +185,24 @@ def main():
             "mpu_id": mpu_id,
             "tmp_prefix": args.tmp_prefix,
             "s3_config": {
-                "region": AWS_S3_REGION,
-                "endpoint": AWS_S3_ENDPOINT,
-                "aws_access_key_id": AWS_ACCESS_KEY_ID,
-                "aws_secret_access_key": AWS_SECRET_ACCESS_KEY,
+                "region": args.s3_region,
+                "endpoint": args.s3_endpoint,
+                "aws_access_key_id": args.aws_access_key_id,
+                "aws_secret_access_key": args.aws_secret_access_key,
             },
-            "rabbitmq_config": {"uri": args.rabbitmq_uri},
         }
         for i in range(args.partitions)
     ]
 
-    with open(f"{args.payload_filename}.json", "w") as f:
-        json.dump(params, f)
+    if args.split > 1:
+        assert args.partitions % args.split == 0
+        stride = args.partitions // args.split
+        for i in range(args.split):
+            with open(args.payload_filename + f"_part-{str(i).zfill(4)}" + ".json", "w") as f:
+                f.write(json.dumps(params[stride * i : (stride * i) + stride], indent=4))
+    else:
+        with open(f"{args.payload_filename}.json", "w") as f:
+            json.dump(params, f, indent=4)
 
 
 if __name__ == "__main__":
