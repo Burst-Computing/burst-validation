@@ -45,8 +45,8 @@ if __name__ == "__main__":
     for i in range(args.workers):
         payload = base_payload.copy()
         payload["base_worker_id"] = (i // args.granularity) * args.granularity
-        payload["start_byte"] = (input_head["ContentLength"] // args.workers) * i
-        payload["end_byte"] = (input_head["ContentLength"] // args.workers) * (i + 1)
+        payload["start_byte"] = (input_head["ContentLength"] // args.granularity) * i
+        payload["end_byte"] = (input_head["ContentLength"] // args.granularity) * (i + 1)
         params.append(payload)
 
     executor = OpenwhiskExecutor(args.ow_host, args.ow_port, args.debug)
