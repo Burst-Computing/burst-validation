@@ -111,7 +111,7 @@ fn hyperparameter_tuning(args: Input,  burst_middleware: Middleware<Bytes>) -> O
         burst_middleware.send(args.base_worker_id, Bytes::from(buffer));
     } else {
         messages.push(Bytes::from(buffer));
-        for i in 1..(args.base_worker_id + args.granularity) {
+        for i in (args.base_worker_id + 1)..(args.base_worker_id + args.granularity) {
             messages.push(burst_middleware.recv(i).unwrap());
         }
     }
@@ -130,7 +130,7 @@ fn hyperparameter_tuning(args: Input,  burst_middleware: Middleware<Bytes>) -> O
     if burst_middleware.info.worker_id != args.base_worker_id {
         burst_middleware.send(args.base_worker_id, Bytes::from("done"));
     } else {
-        for i in 1..(args.base_worker_id + args.granularity) {
+        for i in (args.base_worker_id + 1)..(args.base_worker_id + args.granularity) {
             burst_middleware.recv(i);
         }
     }
