@@ -1,5 +1,10 @@
 use actions::main as ow_main;
-use burst_communication_middleware::{create_actors, Backend, Config};
+use burst_communication_middleware::{
+    BurstMiddleware, BurstOptions, Middleware, RedisListImpl, RedisListOptions, TokioChannelImpl,
+    TokioChannelOptions,
+};
+use bytes::Bytes;
+use clap::Parser;
 use log::info;
 use serde_json::Value;
 use std::{
@@ -8,24 +13,52 @@ use std::{
     thread,
 };
 
-const GRANULARITY: u32 = 4;
-const INPUT_JSON_PARAMS: &str = "sort_payload.json";
-const ENABLE_CHUNKING: bool = false;
-const CHUNK_SIZE: usize = 1 * 1024 * 1024; // 1MB
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[arg(short, long, default_value = "terasort")]
+    burst_id: String,
+
+    #[arg(short, long)]
+    granularity: u32,
+
+    #[arg(short, long)]
+    burst_size: u32,
+
+    #[arg(short, long)]
+    group_id: u32,
+
+    #[arg(short, long, default_value = "input_payload.json")]
+    input_json_params: String,
+
+    #[arg(short, long)]
+    redis_url: String,
+
+    #[arg(short, long, default_value = "true")]
+    enable_chunking: bool,
+
+    #[arg(short, long, default_value = "1048576")]
+    message_chunk_size: usize,
+}
 
 fn main() {
-    // env_logger::init();
+    env_logger::init();
 
-    let input_json_file = File::open(INPUT_JSON_PARAMS).unwrap();
+    let args = Args::parse();
+
+    let input_json_file = File::open(args.input_json_params).unwrap();
     let params: Vec<Value> = serde_json::from_reader(input_json_file).unwrap();
 
-    let burst_size = params.len() as u32;
-
-    if burst_size % GRANULARITY != 0 {
-        panic!("BURST_SIZE must be divisible by GRANULARITY");
+    if args.burst_size % args.granularity != 0 {
+        panic!(
+            "BURST_SIZE {} must be divisible by GRANULARITY {}",
+            args.burst_size, args.granularity
+        );
     }
 
-    let num_groups = burst_size / GRANULARITY;
+    let num_groups = args.burst_size / args.granularity;
+    println!("num_groups: {}", num_groups);
     let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -34,45 +67,70 @@ fn main() {
         .map(|group_id| {
             (
                 group_id.to_string(),
-                ((GRANULARITY * group_id)..((GRANULARITY * group_id) + GRANULARITY)).collect(),
+                ((args.granularity * group_id)..((args.granularity * group_id) + args.granularity))
+                    .collect(),
             )
         })
         .collect::<HashMap<String, HashSet<u32>>>();
 
-    let proxies = (0..num_groups)
-        .flat_map(|group_id| {
-            create_actors(
-                Config {
-                    backend: Backend::RedisList,
-                    server: Some("redis://localhost:6379".to_string()),
-                    burst_id: "terasort".to_string(),
-                    burst_size,
-                    group_ranges: group_ranges.clone(),
-                    group_id: group_id.to_string(),
-                    chunking: ENABLE_CHUNKING,
-                    chunk_size: CHUNK_SIZE,
-                    tokio_broadcast_channel_size: Some(256),
-                },
-                &tokio_runtime,
+    let burst_options = BurstOptions::new(
+        args.burst_size,
+        group_ranges.clone(),
+        args.group_id.to_string(),
+    )
+    .burst_id(args.burst_id.clone())
+    .enable_message_chunking(args.enable_chunking)
+    .message_chunk_size(args.message_chunk_size)
+    .build();
+    let channel_options = TokioChannelOptions::new()
+        .broadcast_channel_size(256)
+        .build();
+    let backend_options = RedisListOptions::new(args.redis_url.clone()).build();
+
+    let fut = BurstMiddleware::create_proxies::<TokioChannelImpl, RedisListImpl, _, _>(
+        burst_options,
+        channel_options,
+        backend_options,
+    );
+    let proxies = tokio_runtime.block_on(fut).unwrap();
+
+    let actors = proxies
+        .into_iter()
+        .map(|(worker_id, middleware)| {
+            (
+                worker_id,
+                Middleware::new(middleware, tokio_runtime.handle().clone()),
             )
         })
-        .collect::<Vec<_>>();
+        .collect::<HashMap<u32, Middleware<Bytes>>>();
 
-    let threads = proxies
+    let mut actors_vec = actors.into_iter().collect::<Vec<_>>();
+    // sort proxies by worker_id so that the order of the workers and the ordered params is correct
+    actors_vec.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+    assert!(actors_vec.len() == params.len());
+
+    let threads = actors_vec
         .into_iter()
-        .flatten()
         .zip(params)
         .map(|(proxies, param)| {
             thread::spawn(move || {
                 let (worker_id, proxy) = proxies;
                 info!("thread start: id={}", worker_id);
-                let r = ow_main(param, proxy);
+                let result = ow_main(param, proxy);
                 info!("thread end: id={}", worker_id);
-                r
+                result
             })
         })
         .collect::<Vec<_>>();
-    for t in threads {
-        t.join().unwrap().unwrap();
+
+    let mut results = Vec::with_capacity(threads.len());
+    for thread in threads {
+        let worker_result = thread.join().unwrap().unwrap();
+        results.push(worker_result);
     }
+
+    let output_filename = format!("output_{}_group-{}.json", args.burst_id, args.group_id);
+    let output_file = File::create(output_filename).unwrap();
+    serde_json::to_writer(output_file, &results).unwrap();
 }

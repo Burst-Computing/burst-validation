@@ -5,7 +5,7 @@ use aws_config::retry::RetryConfig;
 use aws_config::Region;
 use aws_credential_types::Credentials;
 use aws_sdk_s3::Client as S3Client;
-use burst_communication_middleware::Middleware;
+use burst_communication_middleware::{Middleware, MiddlewareActorHandle};
 use bytes::Bytes;
 use polars::{
     chunked_array::{ops::SortOptions, ChunkedArray},
@@ -330,8 +330,7 @@ fn sort_burst(args: Input, burst_middleware: Middleware<Bytes>) -> Output {
     }
 }
 
-fn sort_burst_all2all(args: Input, burst_middleware: Middleware<Bytes>) -> Output {
-    let burst_middleware = burst_middleware.get_actor_handle();
+fn sort_burst_all2all(args: Input, burst_middleware: &MiddlewareActorHandle<Bytes>) -> Output {
     let init_fn = get_timestamp_in_milliseconds().unwrap().to_string();
 
     // create s3 client
@@ -535,9 +534,9 @@ fn sort_burst_all2all(args: Input, burst_middleware: Middleware<Bytes>) -> Outpu
 pub fn main(args: Value, burst_middleware: Middleware<Bytes>) -> Result<Value, Error> {
     let input: Input = serde_json::from_value(args)?;
     println!("Starting sort: {:?}", input);
-
+    let burst_middleware = burst_middleware.get_actor_handle();
     //let result = sort_burst(input, burst_middleware);
-    let result = sort_burst_all2all(input, burst_middleware);
+    let result = sort_burst_all2all(input, &burst_middleware);
 
     println!("Done");
     println!("{:?}", result);
