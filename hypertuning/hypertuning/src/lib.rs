@@ -3,7 +3,7 @@ use aws_config::retry::RetryConfig;
 use aws_credential_types::Credentials;
 use aws_sdk_s3::Client as S3Client;
 use burst_communication_middleware::Middleware;
-use bytes::{Bytes};
+use bytes::Bytes;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{Error, Value};
 use std::fs::File;
@@ -108,7 +108,7 @@ fn hyperparameter_tuning(args: Input,  burst_middleware: Middleware<Bytes>) -> O
 
     let mut messages: Vec<Bytes> = Vec::new();
     if burst_middleware.info.worker_id != args.base_worker_id {
-        burst_middleware.send(args.base_worker_id, Bytes::from(buffer));
+        burst_middleware.send(args.base_worker_id, Bytes::from(buffer)).unwrap();
     } else {
         messages.push(Bytes::from(buffer));
         for i in (args.base_worker_id + 1)..(args.base_worker_id + args.granularity) {
@@ -128,17 +128,16 @@ fn hyperparameter_tuning(args: Input,  burst_middleware: Middleware<Bytes>) -> O
     let input_gathered = get_timestamp_in_milliseconds().unwrap().to_string();
 
     if burst_middleware.info.worker_id != args.base_worker_id {
-        burst_middleware.send(args.base_worker_id, Bytes::from("done"));
+        burst_middleware.send(args.base_worker_id, Bytes::from("done")).unwrap();
     } else {
         for i in (args.base_worker_id + 1)..(args.base_worker_id + args.granularity) {
-            burst_middleware.recv(i);
+            burst_middleware.recv(i).unwrap();
         }
     }
 
    // start Python hyperparameter tuning execution
     let mut cmd = std::process::Command::new("python3");
-    cmd.arg("/gridsearch.py");
-    cmd.arg("--jobs 1");
+    cmd.args(["/gridsearch.py", "--jobs", "1"]);
 
     let output = cmd.output().expect("failed to execute process");
 
