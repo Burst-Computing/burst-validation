@@ -50,7 +50,7 @@ if __name__ == "__main__":
         params.append(payload)
 
     executor = OpenwhiskExecutor(args.ow_host, args.ow_port, args.debug)
-    dt = executor.burst("kmeans-burst",
+    dt = executor.burst("hypertuning-burst",
                         params,
                         file="hypertuning/hypertuning.zip",
                         memory=args.runtime_memory,
