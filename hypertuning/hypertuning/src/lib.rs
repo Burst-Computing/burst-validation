@@ -1,5 +1,5 @@
-use aws_config::Region;
 use aws_config::retry::RetryConfig;
+use aws_config::Region;
 use aws_credential_types::Credentials;
 use aws_sdk_s3::Client as S3Client;
 use burst_communication_middleware::Middleware;
@@ -69,27 +69,24 @@ async fn get_chunk(s3_client: &S3Client, args: &Input) -> Vec<u8> {
     buffer
 }
 
-
-fn hyperparameter_tuning(args: Input,  burst_middleware: Middleware<Bytes>) -> Option<Output> {
+fn hyperparameter_tuning(args: Input, burst_middleware: Middleware<Bytes>) -> Option<Output> {
     let burst_middleware = burst_middleware.get_actor_handle();
     let init_fn = get_timestamp_in_milliseconds().unwrap().to_string();
 
     let credentials_provider = Credentials::from_keys(
         args.s3_config.aws_access_key_id.clone(),
         args.s3_config.aws_secret_access_key.clone(),
-        None
+        None,
     );
 
     let config = match args.s3_config.endpoint.clone() {
-        Some(endpoint) => {
-            aws_sdk_s3::config::Builder::new()
-                .endpoint_url(endpoint)
-                .credentials_provider(credentials_provider)
-                .region(Region::new(args.s3_config.region.clone()))
-                .force_path_style(true)
-                .retry_config(RetryConfig::adaptive())
-                .build()
-        }
+        Some(endpoint) => aws_sdk_s3::config::Builder::new()
+            .endpoint_url(endpoint)
+            .credentials_provider(credentials_provider)
+            .region(Region::new(args.s3_config.region.clone()))
+            .force_path_style(true)
+            .retry_config(RetryConfig::adaptive())
+            .build(),
         None => aws_sdk_s3::config::Builder::new()
             .credentials_provider(credentials_provider)
             .region(Region::new(args.s3_config.region.clone()))
@@ -108,7 +105,9 @@ fn hyperparameter_tuning(args: Input,  burst_middleware: Middleware<Bytes>) -> O
 
     let mut messages: Vec<Bytes> = Vec::new();
     if burst_middleware.info.worker_id != args.base_worker_id {
-        burst_middleware.send(args.base_worker_id, Bytes::from(buffer)).unwrap();
+        burst_middleware
+            .send(args.base_worker_id, Bytes::from(buffer))
+            .unwrap();
     } else {
         messages.push(Bytes::from(buffer));
         for i in (args.base_worker_id + 1)..(args.base_worker_id + args.granularity) {
@@ -128,14 +127,16 @@ fn hyperparameter_tuning(args: Input,  burst_middleware: Middleware<Bytes>) -> O
     let input_gathered = get_timestamp_in_milliseconds().unwrap().to_string();
 
     if burst_middleware.info.worker_id != args.base_worker_id {
-        burst_middleware.send(args.base_worker_id, Bytes::from("done")).unwrap();
+        burst_middleware
+            .send(args.base_worker_id, Bytes::from("done"))
+            .unwrap();
     } else {
         for i in (args.base_worker_id + 1)..(args.base_worker_id + args.granularity) {
             burst_middleware.recv(i).unwrap();
         }
     }
 
-   // start Python hyperparameter tuning execution
+    // start Python hyperparameter tuning execution
     let mut cmd = std::process::Command::new("python3");
     cmd.args(["/gridsearch.py", "--jobs", "1"]);
 
