@@ -119,6 +119,7 @@ fn hyperparameter_tuning(args: Input, burst_middleware: Middleware<Bytes>) -> Op
             .unwrap();
     } else {
         let mut buff = BytesMut::with_capacity(chunk.len() * args.granularity as usize);
+        buff.extend_from_slice(&chunk);
         for i in (args.base_worker_id + 1)..(args.base_worker_id + args.granularity) {
             buff.extend_from_slice(burst_middleware.recv(i).unwrap().as_ref());
         }
