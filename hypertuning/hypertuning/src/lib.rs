@@ -147,11 +147,27 @@ fn hyperparameter_tuning(args: Input, burst_middleware: Middleware<Bytes>) -> Op
         cmd.args(["/gridsearch.py", "--jobs"]);
         cmd.arg(args.granularity.to_string());
 
+        println!(
+            "[Worker {}] Running command: {:?}",
+            burst_middleware.info.worker_id, cmd
+        );
+
         let output = cmd.output().expect("failed to execute process");
 
-        println!("status: {}", output.status);
-        println!("stdout: {}", String::from_utf8_lossy(&output.stdout));
-        println!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        println!(
+            "[Worker {}] status: {}",
+            burst_middleware.info.worker_id, output.status
+        );
+        println!(
+            "[Worker {}] stdout: {}",
+            burst_middleware.info.worker_id,
+            String::from_utf8_lossy(&output.stdout)
+        );
+        println!(
+            "[Worker {}] stderr: {}",
+            burst_middleware.info.worker_id,
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     let end_fn = get_timestamp_in_milliseconds().unwrap().to_string();
