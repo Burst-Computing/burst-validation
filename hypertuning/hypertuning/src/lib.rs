@@ -3,7 +3,7 @@ use aws_config::Region;
 use aws_credential_types::Credentials;
 use aws_sdk_s3::Client as S3Client;
 use burst_communication_middleware::Middleware;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{Error, Value};
 use std::fs::File;
@@ -102,42 +102,41 @@ fn hyperparameter_tuning(args: Input, burst_middleware: Middleware<Bytes>) -> Op
         .unwrap();
 
     let get_t0 = Instant::now();
-    let buffer = tokio_runtime.block_on(get_chunk(&s3_client, &args));
+    let chunk = tokio_runtime.block_on(get_chunk(&s3_client, &args));
     let get_duration = get_t0.elapsed();
 
     println!(
         "[Worker {}] Get time: {:?}, buffer size: {}",
         burst_middleware.info.worker_id,
         get_duration,
-        buffer.len()
+        chunk.len()
     );
 
-    let mut messages: Vec<Bytes> = Vec::new();
+    let mut buffer = None;
     if burst_middleware.info.worker_id != args.base_worker_id {
         burst_middleware
-            .send(args.base_worker_id, Bytes::from(buffer))
+            .send(args.base_worker_id, Bytes::from(chunk))
             .unwrap();
     } else {
-        messages.push(Bytes::from(buffer));
+        let mut buff = BytesMut::with_capacity(chunk.len() * args.granularity as usize);
         for i in (args.base_worker_id + 1)..(args.base_worker_id + args.granularity) {
-            messages.push(burst_middleware.recv(i).unwrap());
+            buff.extend_from_slice(burst_middleware.recv(i).unwrap().as_ref());
         }
-    }
-    let mut buffer: Vec<u8> = Vec::new();
-    for message in messages {
-        buffer.extend_from_slice(&message);
+        buffer = Some(buff.freeze());
     }
 
     let post_download_chunk = get_timestamp_in_milliseconds().unwrap().to_string();
 
-    let mut file = File::create("./train.ft.txt.bz2").unwrap();
-    file.write_all(&buffer).unwrap();
+    if burst_middleware.info.worker_id == args.base_worker_id {
+        let mut file = File::create("./train.ft.txt.bz2").unwrap();
+        let len = buffer.as_ref().unwrap().len();
+        file.write_all(&buffer.unwrap()).unwrap();
 
-    println!(
-        "[Worker {}] Wrote {} bytes to file",
-        burst_middleware.info.worker_id,
-        buffer.len()
-    );
+        println!(
+            "[Worker {}] Wrote {} bytes to file",
+            burst_middleware.info.worker_id, len
+        );
+    }
 
     let input_gathered = get_timestamp_in_milliseconds().unwrap().to_string();
 
