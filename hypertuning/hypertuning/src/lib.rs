@@ -140,25 +140,18 @@ fn hyperparameter_tuning(args: Input, burst_middleware: Middleware<Bytes>) -> Op
 
     let input_gathered = get_timestamp_in_milliseconds().unwrap().to_string();
 
-    if burst_middleware.info.worker_id != args.base_worker_id {
-        burst_middleware
-            .send(args.base_worker_id, Bytes::from("done"))
-            .unwrap();
-    } else {
-        for i in (args.base_worker_id + 1)..(args.base_worker_id + args.granularity) {
-            burst_middleware.recv(i).unwrap();
-        }
+    if burst_middleware.info.worker_id == args.base_worker_id {
+        // start Python hyperparameter tuning execution
+        let mut cmd = std::process::Command::new("python3");
+        cmd.args(["/gridsearch.py", "--jobs"]);
+        cmd.arg(args.granularity.to_string());
+
+        let output = cmd.output().expect("failed to execute process");
+
+        println!("status: {}", output.status);
+        println!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        println!("stderr: {}", String::from_utf8_lossy(&output.stderr));
     }
-
-    // start Python hyperparameter tuning execution
-    let mut cmd = std::process::Command::new("python3");
-    cmd.args(["/gridsearch.py", "--jobs", "1"]);
-
-    let output = cmd.output().expect("failed to execute process");
-
-    println!("status: {}", output.status);
-    println!("stdout: {}", String::from_utf8_lossy(&output.stdout));
-    println!("stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let end_fn = get_timestamp_in_milliseconds().unwrap().to_string();
 
