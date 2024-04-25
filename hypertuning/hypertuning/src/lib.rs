@@ -106,10 +106,12 @@ fn hyperparameter_tuning(args: Input, burst_middleware: Middleware<Bytes>) -> Op
     let get_duration = get_t0.elapsed();
 
     println!(
-        "[Worker {}] Get time: {:?}, buffer size: {}",
+        "[Worker {}] Downloaded range {}-{} ({} bytes) in {:?}",
         burst_middleware.info.worker_id,
+        args.start_byte,
+        args.end_byte,
+        chunk.len(),
         get_duration,
-        chunk.len()
     );
 
     let mut buffer = None;
