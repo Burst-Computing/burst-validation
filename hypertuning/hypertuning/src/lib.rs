@@ -8,7 +8,7 @@ use serde_derive::{Deserialize, Serialize};
 use serde_json::{Error, Value};
 use std::fs::File;
 use std::io::Write;
-use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, SystemTimeError, UNIX_EPOCH};
 use tokio::io::AsyncReadExt;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -101,7 +101,16 @@ fn hyperparameter_tuning(args: Input, burst_middleware: Middleware<Bytes>) -> Op
         .build()
         .unwrap();
 
+    let get_t0 = Instant::now();
     let buffer = tokio_runtime.block_on(get_chunk(&s3_client, &args));
+    let get_duration = get_t0.elapsed();
+
+    println!(
+        "[Worker {}] Get time: {:?}, buffer size: {}",
+        burst_middleware.info.worker_id,
+        get_duration,
+        buffer.len()
+    );
 
     let mut messages: Vec<Bytes> = Vec::new();
     if burst_middleware.info.worker_id != args.base_worker_id {
@@ -124,6 +133,12 @@ fn hyperparameter_tuning(args: Input, burst_middleware: Middleware<Bytes>) -> Op
     let mut file = File::create("./train.ft.txt.bz2").unwrap();
     file.write_all(&buffer).unwrap();
 
+    println!(
+        "[Worker {}] Wrote {} bytes to file",
+        burst_middleware.info.worker_id,
+        buffer.len()
+    );
+
     let input_gathered = get_timestamp_in_milliseconds().unwrap().to_string();
 
     if burst_middleware.info.worker_id != args.base_worker_id {
@@ -144,6 +159,7 @@ fn hyperparameter_tuning(args: Input, burst_middleware: Middleware<Bytes>) -> Op
 
     println!("status: {}", output.status);
     println!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+    println!("stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let end_fn = get_timestamp_in_milliseconds().unwrap().to_string();
 
