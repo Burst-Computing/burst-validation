@@ -31,6 +31,8 @@ if __name__ == "__main__":
                         help="Split output file")
     parser.add_argument("--mib", type=int, required=False, default=None,
                         help="Load X MiB from the dataset")
+    parser.add_argument("--python_script", type=str, required=False, default="/gridsearch.py",
+                        help="Python script to run")
     args = parser.parse_args()
 
     pprint(args)
@@ -48,6 +50,7 @@ if __name__ == "__main__":
         "end_byte": None,
         "base_worker_id": None,
         "granularity": args.granularity,
+        "python_script": args.python_script,
     }
 
     if args.mib:
