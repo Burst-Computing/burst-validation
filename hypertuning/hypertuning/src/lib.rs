@@ -20,6 +20,7 @@ struct Input {
     end_byte: i64,
     base_worker_id: u32,
     granularity: u32,
+    mib: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -148,6 +149,9 @@ fn hyperparameter_tuning(args: Input, burst_middleware: Middleware<Bytes>) -> Op
         let mut cmd = std::process::Command::new("python3");
         cmd.args(["/gridsearch.py", "--jobs"]);
         cmd.arg(args.granularity.to_string());
+        if let Some(mib) = args.mib {
+            cmd.args(["--mib", &mib.to_string()]);
+        }
 
         println!(
             "[Worker {}] Running command: {:?}",

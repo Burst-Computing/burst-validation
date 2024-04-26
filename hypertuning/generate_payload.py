@@ -29,6 +29,8 @@ if __name__ == "__main__":
         "--output", type=str, default="hypertuning_payload.json", help="Output file path")
     parser.add_argument("--split", type=int, default=1,
                         help="Split output file")
+    parser.add_argument("--mib", type=int, required=False, default=None,
+                        help="Load X MiB from the dataset")
     args = parser.parse_args()
 
     pprint(args)
@@ -47,6 +49,9 @@ if __name__ == "__main__":
         "base_worker_id": None,
         "granularity": args.granularity,
     }
+
+    if args.mib:
+        base_payload["mib"] = args.mib
 
     s3_client = boto3.client(
         's3',
