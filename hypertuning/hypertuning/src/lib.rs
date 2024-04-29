@@ -157,6 +157,13 @@ fn hyperparameter_tuning(args: Input, burst_middleware: Middleware<Bytes>) -> Op
         cmd.arg(&args.python_script);
         cmd.args(["--jobs", args.granularity.to_string().as_str()]);
         cmd.args(["--dataset", &filename]);
+        if args.granularity == 1 {
+            cmd.envs([
+                ("MKL_NUM_THREADS", "1"),
+                ("OPENBLAS_NUM_THREADS", "1"),
+                ("NUMEXPR_NUM_THREADS", "1"),
+            ]);
+        }
         if let Some(mib) = args.mib {
             cmd.args(["--mib", &mib.to_string()]);
         }
