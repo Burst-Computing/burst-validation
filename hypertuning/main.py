@@ -9,6 +9,7 @@ from ow_client.parser import add_burst_to_parser, try_or_except, add_openwhisk_t
 def add_hypertuning_to_parser(parser):
     parser.add_argument("--workers", type=int, help="Number of workers to use", required=True)
     parser.add_argument("--python-script", type=str, help="Python script to run", required=True)
+    parser.add_argument("--mib", type=int, help="Load X MiB from the dataset", required=False, default=None)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -32,6 +33,9 @@ if __name__ == "__main__":
         "granularity": args.granularity,
         "python_script": args.python_script,
     }
+
+    if args.mib:
+        base_payload["mib"] = args.mib
 
     s3_client = boto3.client(
         's3',
