@@ -37,6 +37,7 @@ struct Output {
     success: bool,
     init_fn: String,
     post_download_chunk: String,
+    post_send: String,
     input_gathered: String,
     end_fn: String,
 }
@@ -107,6 +108,8 @@ fn hyperparameter_tuning(args: Input, burst_middleware: Middleware<Bytes>) -> Op
     let chunk = tokio_runtime.block_on(get_chunk(&s3_client, &args));
     let get_duration = get_t0.elapsed();
 
+    let post_download_chunk = get_timestamp_in_milliseconds().unwrap().to_string();
+
     println!(
         "[Worker {}] Downloaded range {}-{} ({} bytes) in {:?}",
         burst_middleware.info.worker_id,
@@ -130,7 +133,7 @@ fn hyperparameter_tuning(args: Input, burst_middleware: Middleware<Bytes>) -> Op
         buffer = Some(buff.freeze());
     }
 
-    let post_download_chunk = get_timestamp_in_milliseconds().unwrap().to_string();
+    let post_send = get_timestamp_in_milliseconds().unwrap().to_string();
 
     let filename = format!(
         "{}/{}-train.ft.txt.bz2",
@@ -197,6 +200,7 @@ fn hyperparameter_tuning(args: Input, burst_middleware: Middleware<Bytes>) -> Op
         success: true,
         init_fn,
         post_download_chunk,
+        post_send,
         input_gathered,
         end_fn,
     })
