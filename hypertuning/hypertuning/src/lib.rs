@@ -20,7 +20,7 @@ struct Input {
     end_byte: i64,
     base_worker_id: u32,
     granularity: u32,
-    mib: Option<u32>,
+    mib: Option<f32>,
     python_script: String,
 }
 
