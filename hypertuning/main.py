@@ -10,7 +10,7 @@ def add_hypertuning_to_parser(parser):
     parser.add_argument("--workers", type=int, help="Number of workers to use", required=True)
     parser.add_argument("--python_script", type=str, required=False, default="/gridsearch.py",
                         help="Python script to run")
-    parser.add_argument("--total-mib", type=int, help="Load X MiB from the dataset", required=False, default=20)
+    parser.add_argument("--total-mib", type=float, help="Load X MiB from the dataset", required=False, default=20)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
