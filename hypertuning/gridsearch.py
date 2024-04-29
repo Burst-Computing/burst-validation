@@ -39,7 +39,7 @@ def load_data(dataset, mib):
                                                 '(loky | lithops | dask | ray | tune)')
 @click.option('--address', default=None, help='Scheduler address (dask) or head node address '
                                               '(ray, ray[tune])')
-@click.option('--mib', default=10, type=int, help='Load X MiB from the dataset')
+@click.option('--mib', default=10, type=float, help='Load X MiB from the dataset')
 @click.option('--refit', default=False, is_flag=True, help='Fit the final model with the best '
                                                            'configuration and print score')
 @click.option('--jobs', default=-1, help='Number of jobs to execute the search. -1 means all processors.')
