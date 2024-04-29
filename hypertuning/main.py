@@ -8,7 +8,8 @@ from ow_client.parser import add_burst_to_parser, try_or_except, add_openwhisk_t
 
 def add_hypertuning_to_parser(parser):
     parser.add_argument("--workers", type=int, help="Number of workers to use", required=True)
-    parser.add_argument("--python-script", type=str, help="Python script to run", required=True)
+    parser.add_argument("--python_script", type=str, required=False, default="/gridsearch.py",
+                        help="Python script to run")
     parser.add_argument("--mib", type=int, help="Load X MiB from the dataset", required=False, default=None)
 
 if __name__ == "__main__":
