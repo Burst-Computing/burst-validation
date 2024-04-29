@@ -10,7 +10,7 @@ def add_hypertuning_to_parser(parser):
     parser.add_argument("--workers", type=int, help="Number of workers to use", required=True)
     parser.add_argument("--python_script", type=str, required=False, default="/gridsearch.py",
                         help="Python script to run")
-    parser.add_argument("--mib", type=int, help="Load X MiB from the dataset", required=False, default=None)
+    parser.add_argument("--total-mib", type=int, help="Load X MiB from the dataset", required=False, default=20)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -35,8 +35,7 @@ if __name__ == "__main__":
         "python_script": args.python_script,
     }
 
-    if args.mib:
-        base_payload["mib"] = args.mib
+    base_payload["mib"] = args.mib / (args.workers / args.granularity)
 
     s3_client = boto3.client(
         's3',

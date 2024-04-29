@@ -29,7 +29,7 @@ if __name__ == "__main__":
         "--output", type=str, default="hypertuning_payload.json", help="Output file path")
     parser.add_argument("--split", type=int, default=1,
                         help="Split output file")
-    parser.add_argument("--mib", type=int, required=False, default=None,
+    parser.add_argument("--total-mib", type=int, required=False, default=20,
                         help="Load X MiB from the dataset")
     parser.add_argument("--python_script", type=str, required=False, default="/gridsearch.py",
                         help="Python script to run")
@@ -53,8 +53,7 @@ if __name__ == "__main__":
         "python_script": args.python_script,
     }
 
-    if args.mib:
-        base_payload["mib"] = args.mib
+    base_payload["mib"] = args.total_mib / (args.workers / args.granularity)
 
     s3_client = boto3.client(
         's3',
