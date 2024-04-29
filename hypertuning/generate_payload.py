@@ -82,8 +82,8 @@ if __name__ == "__main__":
         with open(args.output, "w") as f:
             f.write(json.dumps(params, indent=4))
     else:
-        assert args.partitions % args.split == 0
-        sz = args.partitions // args.split
+        assert args.workers % args.split == 0
+        sz = args.workers // args.split
         for i in range(args.split):
             with open(f"part-{str(i).zfill(4)}" + args.output, "w") as f:
                 f.write(json.dumps(
