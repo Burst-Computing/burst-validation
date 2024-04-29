@@ -132,8 +132,14 @@ fn hyperparameter_tuning(args: Input, burst_middleware: Middleware<Bytes>) -> Op
 
     let post_download_chunk = get_timestamp_in_milliseconds().unwrap().to_string();
 
+    let filename = format!(
+        "{}/{}-train.ft.txt.bz2",
+        std::env::temp_dir().to_str().unwrap(),
+        burst_middleware.info.worker_id
+    );
+
     if burst_middleware.info.worker_id == args.base_worker_id {
-        let mut file = File::create("./train.ft.txt.bz2").unwrap();
+        let mut file = File::create(&filename).unwrap();
         let len = buffer.as_ref().unwrap().len();
         file.write_all(&buffer.unwrap()).unwrap();
 
@@ -150,6 +156,7 @@ fn hyperparameter_tuning(args: Input, burst_middleware: Middleware<Bytes>) -> Op
         let mut cmd = std::process::Command::new("python3");
         cmd.arg(&args.python_script);
         cmd.args(["--jobs", args.granularity.to_string().as_str()]);
+        cmd.args(["--dataset", &filename]);
         if let Some(mib) = args.mib {
             cmd.args(["--mib", &mib.to_string()]);
         }
