@@ -10,12 +10,12 @@ import click
 import bz2
 
 
-def load_data(mib):
+def load_data(dataset, mib):
     # Download the dataset at
     # https://www.kaggle.com/bittlingmayer/amazonreviews
 
     print("Loading Amazon reviews dataset:")
-    compressed = bz2.BZ2File('./train.ft.txt.bz2')
+    compressed = bz2.BZ2File(dataset)
 
     X = []
     y = []
@@ -43,10 +43,11 @@ def load_data(mib):
 @click.option('--refit', default=False, is_flag=True, help='Fit the final model with the best '
                                                            'configuration and print score')
 @click.option('--jobs', default=-1, help='Number of jobs to execute the search. -1 means all processors.')
+@click.option('--dataset', default='./train.ft.txt.bz2', help='Amazon reviews dataset file')
 
-def main(backend, address, mib, refit, jobs):
+def main(backend, address, mib, refit, jobs, dataset):
 
-    X, y = load_data(mib)
+    X, y = load_data(dataset, mib)
 
     n_features = 2 ** 18
     pipeline = Pipeline([
