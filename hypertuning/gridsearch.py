@@ -63,59 +63,16 @@ def main(backend, address, mib, refit, jobs, dataset):
         'clf__penalty': ('l2', 'l1', 'elasticnet')
     }
 
-    if backend == 'lithops':
-        from sklearn.model_selection import GridSearchCV
-        from lithops.util.joblib import register_lithops
-        register_lithops()
-        grid_search = GridSearchCV(pipeline, parameters,
-                                   error_score='raise',
-                                   refit=refit, cv=5, n_jobs=jobs)
-
-    elif backend == 'ray':
-        from sklearn.model_selection import GridSearchCV
-        import ray
-        from ray.util.joblib import register_ray
-        address = 'auto' if address is None else address
-        ray.init(address, redis_password='5241590000000000')
-        register_ray()
-        grid_search = GridSearchCV(pipeline, parameters,
-                                   error_score='raise',
-                                   refit=refit, cv=5, n_jobs=jobs)
-
-    elif backend == 'tune':
-        from tune_sklearn import TuneGridSearchCV
-        import ray
-        address = 'auto' if address is None else address
-        ray.init(address, log_to_driver=False, redis_password='5241590000000000')
-        grid_search = TuneGridSearchCV(pipeline, parameters,
-            error_score='raise', refit=refit, cv=5, n_jobs=jobs)
-        backend = 'loky' # not used
-
-    elif backend == 'dask':
-        from dask_ml.model_selection import GridSearchCV
-        from dask_ml.feature_extraction.text import HashingVectorizer as DaskHashingVectorizer
-        from distributed import Client
-        if address is None:
-            print('Error: must specify a scheduler address for dask distributed')
-            exit(1)
-        Client(address=address)
-        pipeline = Pipeline([
-            ('vect', DaskHashingVectorizer(n_features=n_features, alternate_sign=False)),
-            ('clf', SGDClassifier()),
-        ])
-        grid_search = GridSearchCV(pipeline, parameters,
-            error_score='raise', refit=refit, cv=5, n_jobs=jobs)
-
-    else:   # loky
-        from sklearn.model_selection import GridSearchCV
-        grid_search = GridSearchCV(pipeline, parameters,
-            error_score='raise', refit=refit, cv=5, n_jobs=jobs)
+    # loky
+    from sklearn.model_selection import GridSearchCV
+    grid_search = GridSearchCV(pipeline, parameters,
+        error_score='raise', refit=refit, cv=5, n_jobs=jobs)
 
     print("pipeline:", [name for name, _ in pipeline.steps])
     print("parameters: ", end='')
     pprint(parameters)
 
-    with joblib.parallel_backend(backend):
+    with joblib.parallel_config(backend=backend, n_jobs=jobs):
         print("Performing grid search...")
         t0 = time()
         grid_search.fit(X, y)
