@@ -18,7 +18,7 @@ if __name__ == "__main__":
     parser.add_argument("--s3_key", type=str,
                         required=True, help="S3 key prefix")
     parser.add_argument("--s3_endpoint", type=str,
-                        default="", help="S3 endpoint URL")
+                        default=None, help="S3 endpoint URL")
     parser.add_argument("--s3_region", type=str,
                         required=True, help="S3 region name")
     parser.add_argument("--aws_access_key_id", type=str,
