@@ -2,6 +2,7 @@ import bz2
 from pprint import pprint
 from time import time
 import json
+import pickle
 
 import click
 import joblib
@@ -120,8 +121,8 @@ def main(total_mib: float, workers: int, bucket: str, key: str):
     with open('results.json', 'w', encoding='utf-8') as f:
         json.dump(results, f)
     fexec.plot()
-    with open('futures.json', 'w', encoding='utf-8') as f:
-        json.dump(futures, f)
+    with open('futures.pickle', 'wb') as f:
+        pickle.dump(futures, f)
 
 
 if __name__ == "__main__":
