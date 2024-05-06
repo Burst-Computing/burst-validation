@@ -1,6 +1,7 @@
 import bz2
 from pprint import pprint
 from time import time
+import json
 
 import click
 import joblib
@@ -77,18 +78,35 @@ def func(backend='loky', mib=10.0, refit=False, jobs=-1, dataset='./train.ft.txt
 
 
 def map_func(id, storage: Storage, mib: float, bucket: str, key: str):
+    init_fn = get_timestamp_in_milliseconds()
     print(f"Running job {id}")
     dataset = storage.get_object(bucket, key)
+    post_download_chunk = get_timestamp_in_milliseconds()
+    post_send = get_timestamp_in_milliseconds()
     print(f"Downloaded {len(dataset) / 2**20} MiB")
     with open(f'/tmp/{id}.txt.bz2', 'wb') as f:
         f.write(dataset)
+    input_gathered = get_timestamp_in_milliseconds()
     print(f"Saved to /tmp/{id}.txt.bz2")
     func(mib=mib, dataset=f'/tmp/{id}.txt.bz2', jobs=1)
+    end_fn = get_timestamp_in_milliseconds()
+    return {
+        'success': True,
+        'init_fn': init_fn,
+        'post_download_chunk': post_download_chunk,
+        'post_send': post_send,
+        'input_gathered': input_gathered,
+        'end_fn': end_fn,
+    }
+
+
+def get_timestamp_in_milliseconds():
+    return str(int(time() * 1000))
 
 
 @click.command()
-@click.option('--total-mib', default=20, help='Total MiB of data to load')
-@click.option('--workers', default=1, help='Number of workers to use')
+@click.option('--total-mib', default=20, type=float, help='Total MiB of data to load')
+@click.option('--workers', default=1, type=int, help='Number of workers to use')
 @click.option('--bucket', default='hypertuning', help='Bucket name')
 @click.option('--key', default='train.ft.txt.bz2', help='Key name')
 
@@ -96,9 +114,14 @@ def main(total_mib: float, workers: int, bucket: str, key: str):
     fexec = FunctionExecutor()
     mib_per_worker = total_mib / workers
     iterdata = [(mib_per_worker, bucket, key) for i in range(workers)]
+    futures = fexec.wait()
     fexec.map(map_func, iterdata)
-    fexec.wait()
+    results = fexec.get_result()
+    with open('results.json', 'w', encoding='utf-8') as f:
+        json.dump(results, f)
     fexec.plot()
+    with open('futures.json', 'w', encoding='utf-8') as f:
+        json.dump(futures, f)
 
 
 if __name__ == "__main__":
