@@ -115,8 +115,8 @@ def main(total_mib: float, workers: int, bucket: str, key: str):
     fexec = FunctionExecutor()
     mib_per_worker = total_mib / workers
     iterdata = [(mib_per_worker, bucket, key) for i in range(workers)]
-    futures = fexec.wait()
     fexec.map(map_func, iterdata)
+    futures = fexec.wait()
     results = fexec.get_result()
     with open('results.json', 'w', encoding='utf-8') as f:
         json.dump(results, f)
