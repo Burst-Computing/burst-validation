@@ -17,7 +17,6 @@ Commands:
   redis-stream   Use Redis Streams as backend
   redis-list     Use Redis Lists as backend
   rabbitmq       Use RabbitMQ as backend
-  message-relay  Use burst message relay as backend
   help           Print this message or the help of the given subcommand(s)
 
 Options:

@@ -110,8 +110,6 @@ pub enum Backend {
     RedisList,
     /// Use RabbitMQ as backend
     Rabbitmq,
-    /// Use burst message relay as backend
-    MessageRelay,
 }
 
 impl Display for Backend {
@@ -137,9 +135,6 @@ impl Display for Backend {
             }
             Backend::Rabbitmq => {
                 write!(f, "RabbitMQ")?;
-            }
-            Backend::MessageRelay => {
-                write!(f, "BurstMessageRelay")?;
             }
         }
         Ok(())
@@ -208,7 +203,6 @@ impl From<Arguments> for Config {
             Backend::RedisStream => burst_communication_middleware::Backend::RedisStream,
             Backend::RedisList => burst_communication_middleware::Backend::RedisList,
             Backend::Rabbitmq => burst_communication_middleware::Backend::Rabbitmq,
-            Backend::MessageRelay => burst_communication_middleware::Backend::MessageRelay,
         };
 
         let group_size = args.burst_size / args.groups;
