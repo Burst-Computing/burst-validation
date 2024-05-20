@@ -6,10 +6,11 @@ edition = "2021"
 resolver = "2"
 
 [dependencies]
-burst-communication-middleware = { path = "../burst-communication-middleware", features = [
+burst-communication-middleware = { path = "../../burst-communication-middleware", features = [
     "redis_list",
 ] }
 log = "0.4.20"
+env_logger = "0.9.3"
 aws-sdk-s3 = { version = "1.14.0", features = ["behavior-version-latest"] }
 aws-config = { version = "1.1.9", features = ["behavior-version-latest"] }
 aws-credential-types = { version = "1.1.8", features = [
@@ -23,6 +24,7 @@ serde_json = "1.0"
 serde = "1.0"
 serde_derive = "1.0"
 bytes = "1.5.0"
+clap = { version = "4.5.4", features = ["derive"] }
 
 [[bin]]
 name = "testing"

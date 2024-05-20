@@ -64,6 +64,6 @@ if __name__ == "__main__":
         assert args.partitions % args.split == 0
         sz = args.partitions // args.split
         for i in range(args.split):
-            with open(f"part-{str(i).zfill(4)}" + args.output, "w") as f:
+            with open(f"part-{str(i).zfill(4)}_" + args.output, "w") as f:
                 f.write(json.dumps(
                     payload_list[sz * i:(sz * i) + sz], indent=4))
