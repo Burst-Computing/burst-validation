@@ -35,7 +35,7 @@ if __name__ == "__main__":
         "python_script": args.python_script,
     }
 
-    base_payload["mib"] = args.mib / (args.workers / args.granularity)
+    base_payload["mib"] = args.total_mib / (args.workers / args.granularity)
 
     s3_client = boto3.client(
         's3',
