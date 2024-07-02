@@ -82,3 +82,37 @@ $ cargo run --release -- --benchmark pair --burst-size 2 --group-id 0 --server "
 
 [...]
 ```
+
+## Execute in AWS
+
+Prerequisites:
+
+- AWS CLI with credentials configured
+- AWS AMI with docker installed
+- AWS VPC with a public subnet
+- SSH key pair
+- 2 AWS security groups for the VPC:
+  - One for ssh (port 22)
+  - Another for the intermediate server (e.g. port 6379 for Redis)
+
+### Pair benchmark
+
+The provided scripts `run_pair_redis.sh` and `run_pair_s3.sh` can be used to run the pair benchmark with Redis and S3 as backends, respectively. They can be modified to run the pair benchmark with other backends.
+
+Before running the pair benchmark, you need to change the corresponding variables in the `run_pair_redis.sh` script.
+
+```bash
+$ ./run_pair_redis.sh
+Usage: ./run_pair_redis.sh num_pairs payload_size(MB) chunk_size(KB) repeats
+```
+
+### Collective benchmarks
+
+Before running the collective benchmarks, you need to change the corresponding variables in the `run_bencharmk_redis.sh` script.
+
+```bash
+$ ./run_benchmark_redis.sh
+Usage: ./run_benchmark_redis.sh benchmark burst_size granularity repeats
+```
+
+Where `benchmark` can be `broadcast`, or `all-to-all`.
