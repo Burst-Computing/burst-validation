@@ -1,7 +1,7 @@
 import argparse
 
 VALID_BURST_BACKEND_OPTIONS = ["rabbitmq", "redis", "redis-stream", "redis-list", "s3"]
-DEFAULT_DOCKER_IMAGE = "manriurv/rust_burst:1"
+DEFAULT_DOCKER_IMAGE = "burstcomputing/runtime-rust-burst:latest"
 
 def add_burst_to_parser(parser):
     parser.add_argument("--granularity", type=int, required=False, help="Granularity of burst workers", default=None)

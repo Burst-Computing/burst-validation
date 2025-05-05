@@ -28,7 +28,7 @@ if __name__ == "__main__":
                         debug_mode=args.debug,
                         backend=args.backend,
                         chunk_size=args.chunk_size,
-                        custom_image="manriurv/rust_burst:1",
+                        custom_image=args.custom_image,
                         is_zip=True)
     dt.plot()
     result = dt.get_results()
