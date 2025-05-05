@@ -17,7 +17,7 @@ use std::{
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    #[arg(short, long, default_value = "terasort")]
+    #[arg(short, long, default_value = "hypertuning")]
     burst_id: String,
 
     #[arg(short, long)]

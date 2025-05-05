@@ -97,6 +97,12 @@ pub enum Backend {
         /// S3 semaphore permits
         #[arg(long = "semaphore-permits", required = false)]
         semaphore_permits: Option<usize>,
+        /// S3 retry
+        #[arg(long = "retry", required = false)]
+        retry: Option<u32>,
+        /// S3 wait time
+        #[arg(long = "wait-time", required = false)]
+        wait_time: Option<f64>,
     },
     /// Use Redis Streams as backend
     RedisStream,
@@ -104,8 +110,6 @@ pub enum Backend {
     RedisList,
     /// Use RabbitMQ as backend
     Rabbitmq,
-    /// Use burst message relay as backend
-    MessageRelay,
 }
 
 impl Display for Backend {
@@ -118,6 +122,8 @@ impl Display for Backend {
                 secret_access_key: _,
                 session_token: _,
                 semaphore_permits: _,
+                retry: _,
+                wait_time: _,
             } => {
                 write!(f, "S3")?;
             }
@@ -129,9 +135,6 @@ impl Display for Backend {
             }
             Backend::Rabbitmq => {
                 write!(f, "RabbitMQ")?;
-            }
-            Backend::MessageRelay => {
-                write!(f, "BurstMessageRelay")?;
             }
         }
         Ok(())
@@ -185,6 +188,8 @@ impl From<Arguments> for Config {
                 secret_access_key,
                 session_token,
                 semaphore_permits,
+                retry,
+                wait_time,
             } => burst_communication_middleware::Backend::S3 {
                 bucket,
                 region,
@@ -192,11 +197,12 @@ impl From<Arguments> for Config {
                 secret_access_key,
                 session_token,
                 semaphore_permits,
+                retry,
+                wait_time,
             },
             Backend::RedisStream => burst_communication_middleware::Backend::RedisStream,
             Backend::RedisList => burst_communication_middleware::Backend::RedisList,
             Backend::Rabbitmq => burst_communication_middleware::Backend::Rabbitmq,
-            Backend::MessageRelay => burst_communication_middleware::Backend::MessageRelay,
         };
 
         let group_size = args.burst_size / args.groups;
