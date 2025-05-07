@@ -19,8 +19,8 @@ DEFAULT_PAYLOAD_FILENAME = "sort_payload"
 DEFAULT_TMP_PREFIX = "tmp/"
 
 AWS_S3_REGION = "us-east-1"
-AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", "AKIASNA4IND7HTOF5TVP")
-AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "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")
+AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", "minioadmin")
+AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "minioadmin")
 AWS_SESSION_TOKEN = os.environ.get("AWS_SESSION_TOKEN", None)
 
 S3_MAX_PUT_RATE = 5500
